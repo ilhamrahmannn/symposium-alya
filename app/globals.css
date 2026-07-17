@@ -32,3 +32,13 @@ body{font-size:14px}.finance-brand b{font-size:15px}.finance-brand small,.progra
 @media(max-width:760px){.eyebrow{font-size:10px}.page-heading h1{font-size:27px}.page-heading p{font-size:14px}.program-banner p{font-size:13px}.banner-meta b{font-size:11px}.summary-card h3{font-size:18px}.mobile-tx b{font-size:12px}.mobile-tx small{font-size:10px}.mobile-bottom button{font-size:10px}.report-card b{font-size:14px}.report-card p,.report-card button{font-size:12px}.budget-info b{font-size:13px}.budget-info small,.budget-bar small{font-size:11px}}
 
 @media print{body{font-size:9pt}th{font-size:7pt}td,td b,td small,.report-breakdowns p,.statement-notes,.signature-grid>div{font-size:7.5pt}.report-numbers small{font-size:7pt}.report-numbers b{font-size:11pt}}
+
+/* Native-control polish: nested search fields, receipt picker and member actions */
+.global-search,.search-box{overflow:hidden}.global-search input,.search-box input{display:block;flex:1 1 auto;width:auto;min-width:0;min-height:0;height:100%;margin:0;padding:0;border:0;border-radius:0;background:transparent;box-shadow:none}.global-search input:focus,.search-box input:focus{border:0;box-shadow:none}.global-search>svg,.search-box>svg{display:block;flex:0 0 16px;margin:0}.filter-bar .search-box{flex:1 1 320px;width:auto;min-width:220px}.filter-bar select{flex:0 0 auto;min-width:135px}
+input[type="file"]{min-height:44px;padding:5px 6px;color:var(--text);line-height:32px;overflow:hidden}input[type="file"]::file-selector-button{height:32px;margin:0 10px 0 0;padding:0 13px;border:0;border-radius:8px;background:var(--bg2);color:var(--pink2);font:inherit;font-weight:750;cursor:pointer;transition:background-color .2s,color .2s}input[type="file"]::file-selector-button:hover{background:var(--soft);color:var(--pink2)}
+.access-panel>button{min-height:44px;display:inline-flex;align-items:center;justify-content:center;gap:7px;padding:0 12px}.access-panel>button svg{display:block;flex:0 0 16px;margin:0}
+
+/* Transaction filters stay contained at every viewport and browser zoom level */
+.filter-bar{display:flex;flex-wrap:wrap;align-items:center;overflow:visible}.filter-bar .search-box{flex:1 1 300px;min-width:220px}.filter-bar select{flex:0 1 160px;width:160px;min-width:135px}.filter-bar>button{flex:0 0 auto;white-space:nowrap}
+@media(max-width:760px){.filter-bar .search-box{flex:1 0 100%;width:100%;min-width:0}.filter-bar select{flex:1 1 145px;width:auto;min-width:0}.filter-bar>button{flex:1 1 auto;justify-content:center;min-width:120px}}
+@media(max-width:420px){.filter-bar select,.filter-bar>button{flex:1 0 100%;width:100%}}
