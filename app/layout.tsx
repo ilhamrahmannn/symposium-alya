@@ -5,8 +5,16 @@ import "./globals.css";
 const jakarta = Plus_Jakarta_Sans({ variable: "--font-jakarta", subsets: ["latin"], display: "swap" });
 
 export const metadata: Metadata = {
-  title: "Program Accounting · PRS Symposium 2026",
-  description: "Financial management for the Pierre Robin Sequence Symposium & Workshop.",
+  title: "Pierre Robin Sequence Symposium & Workshop 2026",
+  description: "Register for the Symposium on Management of Pierre Robin Sequence in Infants 2026: From Airway to Oral Rehabilitation — A Collaborative Approach.",
+  metadataBase: process.env.NEXT_PUBLIC_SITE_URL ? new URL(process.env.NEXT_PUBLIC_SITE_URL) : undefined,
+  alternates: { canonical: "/" },
+  openGraph: {
+    title: "Pierre Robin Sequence Symposium & Workshop 2026",
+    description: "From Airway to Oral Rehabilitation — A Collaborative Approach.",
+    type: "website",
+    url: "/",
+  },
   icons: { icon: "/favicon.svg", shortcut: "/favicon.svg" },
 };
 

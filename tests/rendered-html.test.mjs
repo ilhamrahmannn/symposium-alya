@@ -8,13 +8,14 @@ async function render() {
   return worker.fetch(new Request("http://localhost/", { headers: { accept: "text/html" } }), { ASSETS: { fetch: async () => new Response("Not found", { status: 404 }) } }, { waitUntil() {}, passThroughOnException() {} });
 }
 
-test("server-renders Program Accounting", async () => {
+test("server-renders the public PRS Symposium homepage", async () => {
   const response = await render();
   assert.equal(response.status, 200);
   const html = await response.text();
-  assert.match(html, /Program Accounting/);
-  assert.match(html, /Pierre Robin Sequence Symposium/);
-  assert.match(html, /Current Balance/i);
+  assert.match(html, /Symposium on Management of/);
+  assert.match(html, /Pierre Robin Sequence/);
+  assert.match(html, /Register Now/i);
+  assert.doesNotMatch(html, /Current Balance/i);
   assert.doesNotMatch(html, /codex-preview/);
 });
 

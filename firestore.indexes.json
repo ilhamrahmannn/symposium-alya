@@ -5,7 +5,10 @@
     {"collectionGroup":"transactions","queryScope":"COLLECTION","fields":[{"fieldPath":"status","order":"ASCENDING"},{"fieldPath":"transactionDate","order":"DESCENDING"}]},
     {"collectionGroup":"transactions","queryScope":"COLLECTION","fields":[{"fieldPath":"categoryId","order":"ASCENDING"},{"fieldPath":"transactionDate","order":"DESCENDING"}]},
     {"collectionGroup":"transactions","queryScope":"COLLECTION","fields":[{"fieldPath":"paymentMethod","order":"ASCENDING"},{"fieldPath":"transactionDate","order":"DESCENDING"}]},
-    {"collectionGroup":"transactions","queryScope":"COLLECTION","fields":[{"fieldPath":"createdBy","order":"ASCENDING"},{"fieldPath":"transactionDate","order":"DESCENDING"}]}
+    {"collectionGroup":"transactions","queryScope":"COLLECTION","fields":[{"fieldPath":"createdBy","order":"ASCENDING"},{"fieldPath":"transactionDate","order":"DESCENDING"}]},
+    {"collectionGroup":"registrations","queryScope":"COLLECTION","fields":[{"fieldPath":"paymentStatus","order":"ASCENDING"},{"fieldPath":"submittedAt","order":"DESCENDING"}]},
+    {"collectionGroup":"registrations","queryScope":"COLLECTION","fields":[{"fieldPath":"registrationStatus","order":"ASCENDING"},{"fieldPath":"submittedAt","order":"DESCENDING"}]},
+    {"collectionGroup":"registrations","queryScope":"COLLECTION","fields":[{"fieldPath":"attendanceType","order":"ASCENDING"},{"fieldPath":"submittedAt","order":"DESCENDING"}]}
   ],
   "fieldOverrides": []
 }

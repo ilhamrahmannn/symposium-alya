@@ -1,5 +1,5 @@
 import { getApps, initializeApp } from "firebase/app";
-import { getAuth, GoogleAuthProvider, signInWithPopup } from "firebase/auth";
+import { createUserWithEmailAndPassword, getAuth, GoogleAuthProvider, signInAnonymously, signInWithEmailAndPassword, signInWithPopup, signOut, updateProfile } from "firebase/auth";
 import { getFirestore } from "firebase/firestore";
 import { getStorage } from "firebase/storage";
 
@@ -20,4 +20,26 @@ export const storage = firebaseApp ? getStorage(firebaseApp) : null;
 export async function googleSignIn() {
   if (!auth) throw new Error("Firebase environment variables are not configured.");
   return signInWithPopup(auth, new GoogleAuthProvider());
+}
+
+export async function anonymousSignIn() {
+  if (!auth) throw new Error("Registration service is not configured.");
+  if (auth.currentUser) return auth.currentUser;
+  return (await signInAnonymously(auth)).user;
+}
+
+export async function firebaseSignOut() {
+  if (auth) await signOut(auth);
+}
+
+export async function emailSignIn(email:string,password:string) {
+  if (!auth) throw new Error("Firebase environment variables are not configured.");
+  return signInWithEmailAndPassword(auth,email,password);
+}
+
+export async function emailSignUp(fullName:string,email:string,password:string) {
+  if (!auth) throw new Error("Firebase environment variables are not configured.");
+  const credential=await createUserWithEmailAndPassword(auth,email,password);
+  await updateProfile(credential.user,{displayName:fullName.trim()});
+  return credential;
 }

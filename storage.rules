@@ -3,12 +3,12 @@ service firebase.storage {
   match /b/{bucket}/o {
     function member(programId) { return request.auth != null && firestore.exists(/databases/(default)/documents/programs/$(programId)/members/$(request.auth.uid)) && firestore.get(/databases/(default)/documents/programs/$(programId)/members/$(request.auth.uid)).data.active == true; }
     function admin(programId) { return member(programId) && firestore.get(/databases/(default)/documents/programs/$(programId)/members/$(request.auth.uid)).data.role == 'admin'; }
-    match /programs/{programId}/receipts/{transactionId}/{fileName} {
-      allow read: if member(programId);
-      allow create, update: if admin(programId)
-        && request.resource.size <= 10 * 1024 * 1024
-        && request.resource.contentType.matches('application/pdf|image/jpeg|image/png');
-      allow delete: if admin(programId);
+    function validFile() { return request.resource.size <= 10 * 1024 * 1024 && request.resource.contentType.matches('application/pdf|image/jpeg|image/png'); }
+    match /programs/{programId}/receipts/{transactionId}/{fileName} { allow read: if member(programId); allow create, update: if admin(programId) && validFile(); allow delete: if admin(programId); }
+    match /programs/{programId}/registration-payments/{ownerUid}/{registrationId}/{fileName} {
+      allow read: if admin(programId);
+      allow create: if request.auth != null && request.auth.uid == ownerUid && validFile() && request.resource.metadata.ownerUid == request.auth.uid && request.resource.metadata.registrationId == registrationId;
+      allow update, delete: if admin(programId);
     }
   }
 }

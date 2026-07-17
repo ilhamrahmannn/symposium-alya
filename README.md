@@ -67,3 +67,24 @@ After bootstrap, only an existing admin can assign or change roles.
 - Approved and paid expenses are actual spending.
 - A refund uses optional `relatedTransactionId` to reduce the related income or expense.
 - Financial totals are calculated from transaction records and are never trusted client-written fields.
+
+## Public event and registration routes
+
+- `/` public black-and-gold event homepage
+- `/register` participant registration and payment-proof upload
+- `/registration-success/:referenceNumber` acknowledgement
+- `/privacy` and `/terms` public legal pages
+- `/admin/login` administrator sign-in
+- `/admin/*` protected light-pink accounting and registration administration
+
+Enable both **Google** and **Anonymous** providers in Firebase Authentication. Anonymous authentication assigns a temporary upload owner to a public submission; it does not grant administrator access.
+
+In the protected Program Settings page, use **Event settings** to enter confirmed dates, venue, organiser, contacts, registration period and capacity. Empty optional fields stay hidden from the public homepage.
+
+Deploy the expanded security configuration:
+
+```bash
+firebase deploy --only firestore:rules,firestore:indexes,storage
+```
+
+For production, enable Firebase App Check and set `NEXT_PUBLIC_FIREBASE_APP_CHECK_SITE_KEY`. Transactional email is optional; keep `EMAIL_PROVIDER_API_KEY` and `EMAIL_FROM_ADDRESS` in a trusted server environment only. Registration submission remains functional when email is not configured.
