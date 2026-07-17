@@ -1,0 +1,63 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() { return request.auth != null; }
+    function memberDoc(programId) { return get(/databases/$(database)/documents/programs/$(programId)/members/$(request.auth.uid)); }
+    function isMember(programId) { return signedIn() && exists(/databases/$(database)/documents/programs/$(programId)/members/$(request.auth.uid)) && memberDoc(programId).data.active == true; }
+    function isAdmin(programId) { return isMember(programId) && memberDoc(programId).data.role == 'admin'; }
+    function validType() { return request.resource.data.type in ['income','expense','refund','adjustment']; }
+    function validStatus() { return request.resource.data.status in ['pending','approved','paid','cancelled']; }
+    function validAmount(field) { return field is int && field > 0; }
+    function validTransactionCreate(programId) {
+      return request.resource.data.keys().hasAll(['programId','type','amountInSen','categoryId','description','paymentMethod','transactionDate','status','createdBy','createdAt'])
+        && request.resource.data.programId == programId && validType() && validStatus()
+        && validAmount(request.resource.data.amountInSen)
+        && request.resource.data.description is string && request.resource.data.description.size() > 0
+        && request.resource.data.createdBy == request.auth.uid
+        && !request.resource.data.keys().hasAny(['totalIncome','totalExpenses','currentBalance','budgetRemaining']);
+    }
+    function validTransactionUpdate(programId) {
+      return request.resource.data.programId == programId && validType() && validStatus()
+        && validAmount(request.resource.data.amountInSen)
+        && request.resource.data.createdBy == resource.data.createdBy
+        && request.resource.data.createdAt == resource.data.createdAt
+        && request.resource.data.updatedBy == request.auth.uid
+        && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['programId','createdBy','createdAt']);
+    }
+    function validBudget(programId) {
+      return request.resource.data.programId == programId
+        && request.resource.data.keys().hasAll(['programId','categoryId','allocatedAmountInSen','createdBy','createdAt','updatedBy','updatedAt'])
+        && validAmount(request.resource.data.allocatedAmountInSen)
+        && request.resource.data.updatedBy == request.auth.uid;
+    }
+
+    match /programs/{programId} {
+      allow read: if isMember(programId);
+      allow create: if false;
+      allow update: if isAdmin(programId) && !request.resource.data.keys().hasAny(['totalIncome','totalExpenses','currentBalance','budgetRemaining']);
+      allow delete: if false;
+
+      match /members/{userId} {
+        allow read: if isMember(programId);
+        allow create, update: if isAdmin(programId) && request.resource.data.role in ['admin','viewer'] && request.resource.data.active is bool;
+        allow delete: if isAdmin(programId) && userId != request.auth.uid;
+      }
+      match /transactions/{id} {
+        allow read: if isMember(programId);
+        allow create: if isAdmin(programId) && validTransactionCreate(programId);
+        allow update: if isAdmin(programId) && validTransactionUpdate(programId);
+        allow delete: if false; // financial records use cancellation or soft deletion
+      }
+      match /categories/{id} {
+        allow read: if isMember(programId);
+        allow create, update: if isAdmin(programId) && request.resource.data.name is string && request.resource.data.active is bool;
+        allow delete: if false;
+      }
+      match /budgets/{id} {
+        allow read: if isMember(programId);
+        allow create, update: if isAdmin(programId) && validBudget(programId);
+        allow delete: if isAdmin(programId); // removes allocation only, never its category/transactions
+      }
+    }
+  }
+}

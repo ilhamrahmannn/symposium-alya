@@ -5,8 +5,8 @@ import "./globals.css";
 const jakarta = Plus_Jakarta_Sans({ variable: "--font-jakarta", subsets: ["latin"], display: "swap" });
 
 export const metadata: Metadata = {
-  title: "Pierre Robin Sequence Symposium & Workshop 2026",
-  description: "A multidisciplinary clinical symposium focused on the management of Pierre Robin Sequence in infants.",
+  title: "Program Accounting · PRS Symposium 2026",
+  description: "Financial management for the Pierre Robin Sequence Symposium & Workshop.",
   icons: { icon: "/favicon.svg", shortcut: "/favicon.svg" },
 };
 
