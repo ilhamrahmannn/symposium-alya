@@ -1,8 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
-import CountUp from "react-countup";
 import {
   ArrowRight, CalendarDays, Check, ChevronRight, Clock3, FileText,
   HeartPulse, LayoutDashboard, MapPin, Menu, Mic2, Plus, Search,
@@ -28,11 +27,31 @@ const speakers = [
   { initials: "SN", name: "Dr Sofia Nordin", role: "Paediatric Sleep Physician", colour: "amber" },
 ];
 
+function AnimatedNumber({ value, suffix = "" }: { value: number; suffix?: string }) {
+  const [display, setDisplay] = useState(0);
+  const reduce = useReducedMotion();
+
+  useEffect(() => {
+    if (reduce) { setDisplay(value); return; }
+    const started = performance.now();
+    let frame = 0;
+    const tick = (now: number) => {
+      const progress = Math.min((now - started) / 900, 1);
+      setDisplay(Math.round(value * (1 - Math.pow(1 - progress, 3))));
+      if (progress < 1) frame = requestAnimationFrame(tick);
+    };
+    frame = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(frame);
+  }, [value, reduce]);
+
+  return <>{display.toLocaleString("en-MY")}{suffix}</>;
+}
+
 function StatCard({ icon: Icon, label, value, suffix = "", note, featured = false }: any) {
   return (
     <motion.article whileHover={{ y: -3 }} className={`stat-card ${featured ? "featured" : ""}`}>
       <div className="stat-top"><span className="icon-box"><Icon size={19}/></span><span className="trend">+12.4%</span></div>
-      <p>{label}</p><h3><CountUp end={value} duration={1.25} separator="," suffix={suffix}/></h3><small>{note}</small>
+      <p>{label}</p><h3><AnimatedNumber value={value} suffix={suffix}/></h3><small>{note}</small>
     </motion.article>
   );
 }
