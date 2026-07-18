@@ -87,4 +87,20 @@ Deploy the expanded security configuration:
 firebase deploy --only firestore:rules,firestore:indexes,storage
 ```
 
-For production, enable Firebase App Check and set `NEXT_PUBLIC_FIREBASE_APP_CHECK_SITE_KEY`. Transactional email is optional; keep `EMAIL_PROVIDER_API_KEY` and `EMAIL_FROM_ADDRESS` in a trusted server environment only. Registration submission remains functional when email is not configured.
+For production, enable Firebase App Check and set `NEXT_PUBLIC_FIREBASE_APP_CHECK_SITE_KEY`.
+
+### Transactional registration email
+
+The Cloudflare Worker sends registration-received and payment-confirmed emails through Resend. Add these as encrypted Cloudflare Worker secrets/variables (never prefix them with `NEXT_PUBLIC_`):
+
+```text
+RESEND_API_KEY=re_...
+EMAIL_FROM_ADDRESS=PRS Symposium <registration@your-verified-domain.example>
+PUBLIC_SITE_URL=https://your-domain.example
+FIREBASE_PROJECT_ID=symposium-alya
+PROGRAM_ID=prs-symposium-2026
+```
+
+The sender domain must be verified in Resend. If email is not configured or temporarily fails, registration submission and payment verification still complete safely; the admin receives a clear notification that the email was not sent.
+
+Participants can download an A4 acknowledgement PDF immediately after submission. After verification, admins can download an A4 confirmation letter. Both documents include a QR containing only the registration reference number for safe lookup and event check-in.

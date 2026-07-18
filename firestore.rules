@@ -17,12 +17,14 @@ service cloud.firestore {
         && !request.resource.data.keys().hasAny(['totalIncome','totalExpenses','currentBalance','budgetRemaining']);
     }
     function validPublicRegistration(programId) {
-      return signedIn() && registrationOpen(programId)
+      return signedIn()
         && request.resource.data.keys().hasAll(['id','programId','ownerUid','referenceNumber','fullName','identificationNumber','email','phoneNumber','organisationType','workplace','expertise','foodPreference','attendanceType','attendanceLabel','registrationFeeInSen','paymentStatus','registrationStatus','privacyConsent','informationConfirmation','termsAccepted','createdAt','updatedAt'])
         && request.resource.data.programId == programId
         && request.resource.data.ownerUid == request.auth.uid
-        && request.resource.data.fullName is string && request.resource.data.fullName.size() > 1
-        && request.resource.data.identificationNumber is string && request.resource.data.identificationNumber.size() > 3
+        && request.resource.data.id is string
+        && request.resource.data.referenceNumber is string
+        && request.resource.data.fullName is string
+        && request.resource.data.identificationNumber is string
         && request.resource.data.email is string && request.resource.data.phoneNumber is string
         && request.resource.data.attendanceType in ['day1','full']
         && ((request.resource.data.attendanceType == 'day1' && request.resource.data.registrationFeeInSen == 15000) || (request.resource.data.attendanceType == 'full' && request.resource.data.registrationFeeInSen == 30000))
@@ -63,7 +65,7 @@ service cloud.firestore {
       match /categories/{id} { allow read: if isMember(programId); allow create, update: if isAdmin(programId) && request.resource.data.name is string && request.resource.data.active is bool; allow delete: if false; }
       match /budgets/{id} { allow read: if isMember(programId); allow create, update: if isAdmin(programId) && positiveSen(request.resource.data.allocatedAmountInSen); allow delete: if isAdmin(programId); }
       match /registrations/{registrationId} {
-        allow read: if isAdmin(programId);
+        allow read: if isAdmin(programId) || (signedIn() && resource.data.ownerUid == request.auth.uid);
         allow create: if validPublicRegistration(programId);
         allow update: if isAdmin(programId) || (signedIn() && resource.data.ownerUid == request.auth.uid && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['proofOfPaymentPath','updatedAt']) && resource.data.proofOfPaymentPath == '');
         allow delete: if false;

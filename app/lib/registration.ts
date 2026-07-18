@@ -1,6 +1,7 @@
 import { doc, runTransaction, serverTimestamp } from "firebase/firestore";
 import { ref, uploadBytesResumable } from "firebase/storage";
 import { anonymousSignIn, db, storage } from "./firebase";
+import { requestRegistrationEmail } from "./registration-email";
 export { ATTENDANCE, maskIdentification, safeFileName, validateProof } from "./registration-utils";
 import { ATTENDANCE, safeFileName } from "./registration-utils";
 
@@ -48,5 +49,6 @@ export async function submitRegistration(draft:RegistrationDraft,onProgress:(val
   const path=`programs/${PROGRAM_ID}/registration-payments/${user.uid}/${registrationId}/${fileName}`;
   await new Promise<void>((resolve,reject)=>{const task=uploadBytesResumable(ref(storage,path),draft.proofFile!,{contentType:draft.proofFile!.type,customMetadata:{registrationId,ownerUid:user.uid}});task.on("state_changed",s=>onProgress(Math.round(s.bytesTransferred/s.totalBytes*100)),reject,()=>resolve())});
   await runTransaction(db,async tx=>tx.update(registrationRef,{proofOfPaymentPath:path,updatedAt:serverTimestamp()}));
+  await requestRegistrationEmail(user,registrationId,"received");
   return {registrationId,referenceNumber,fullName:draft.fullName.trim().toUpperCase(),attendanceLabel:attendance.label,feeInSen:attendance.feeInSen,submittedAt:new Date().toISOString()};
 }
