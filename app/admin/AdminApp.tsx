@@ -10,7 +10,7 @@ import {
 import {
   ArrowDownToLine, ArrowUpRight, Bell, BriefcaseBusiness,
   CalendarDays, Check, ChevronDown, ChevronRight, CircleDollarSign, Download,
-  FileBarChart, FileText, Filter, LayoutDashboard, Menu, MoreHorizontal, Paperclip,
+  FileBarChart, FileText, Filter, House, LayoutDashboard, Menu, MoreHorizontal, Paperclip,
   Pencil, PieChart as PieIcon, Plus, Receipt, Search, Settings, ShieldCheck,
   Trash2, TrendingDown, TrendingUp, Upload, Users, Wallet, X,
 } from "lucide-react";
@@ -49,12 +49,12 @@ export default function ProgramAccounting({initialPage="dashboard"}:{initialPage
     <aside className={`finance-sidebar ${mobileMenu?"open":""}`}>
       <div className="finance-brand"><span><CircleDollarSign/></span><div><b>Program Accounting</b><small>PRS Symposium 2026</small></div></div>
       <div className="program-chip"><i/><div><small>ACTIVE PROGRAM</small><b>Pierre Robin Sequence Symposium & Workshop</b></div></div>
-      <nav>{items.map(([id,label,Icon])=><button key={id} className={page===id?"active":""} onClick={()=>id==="add"?setModal(true):nav(id)}><Icon/><span>{label}</span>{page===id&&<motion.i layoutId="nav-active"/>}</button>)}</nav>
+      <nav>{items.map(([id,label,Icon])=><button key={id} className={page===id?"active":""} onClick={()=>id==="add"?setModal(true):nav(id)}><Icon/><span>{label}</span>{page===id&&<motion.i layoutId="nav-active"/>}</button>)}<button className="event-home-link" onClick={()=>{location.href="/"}}><House/><span>Event Homepage</span></button></nav>
       <div className="sidebar-support"><ShieldCheck/><div><b>Secure workspace</b><small>Financial data is role protected</small></div></div>
       <div className="user-card"><span>AA</span><div><b>Dr Anisa Alya</b><small>Administrator</small></div><button className="row-menu" aria-label="Sign out" onClick={async()=>{await firebaseSignOut();location.href="/"}}><MoreHorizontal/></button></div>
     </aside>
     <main className="finance-main">
-      <header className="finance-topbar"><button className="hamburger" aria-label="Open navigation" aria-expanded={mobileMenu} onClick={()=>setMobileMenu(!mobileMenu)}><Menu/></button><div className="global-search"><Search/><input aria-label="Search transactions" placeholder="Search transactions, references..."/></div><div className="topbar-actions"><span className="date-chip"><CalendarDays/>24–25 Oct 2026</span><button className="bell" aria-label="Notifications"><Bell/><i/></button><span className="top-avatar">AA</span></div></header>
+      <header className="finance-topbar"><button className="hamburger" aria-label="Open navigation" aria-expanded={mobileMenu} onClick={()=>setMobileMenu(!mobileMenu)}><Menu/></button><div className="global-search"><Search/><input aria-label="Search transactions" placeholder="Search transactions, references..."/></div><div className="topbar-actions"><span className="date-chip"><CalendarDays/>24–25 Oct 2026</span><button className="bell homepage-button" aria-label="Return to event homepage" title="Event Homepage" onClick={()=>{location.href="/"}}><House/></button><button className="bell" aria-label="Notifications"><Bell/><i/></button><span className="top-avatar">AA</span></div></header>
       <AnimatePresence mode="wait"><motion.div key={page} className="finance-content" initial={{opacity:0,y:reduce?0:10}} animate={{opacity:1,y:0}} exit={{opacity:0,y:reduce?0:-5}} transition={{duration:reduce?0:.3}}>
         {page==="dashboard"&&<Dashboard sum={sum} transactions={transactions} expenseData={expenseData} onAdd={()=>setModal(true)} nav={nav}/>} 
         {page==="transactions"&&<Transactions transactions={transactions} onAdd={()=>setModal(true)} onDelete={setConfirmDelete}/>} 

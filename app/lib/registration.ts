@@ -28,8 +28,11 @@ export async function submitRegistration(draft:RegistrationDraft,onProgress:(val
   const counterRef=doc(db,"programs",PROGRAM_ID,"counters","registrations");
   const attendance=ATTENDANCE[draft.attendanceType];
   const referenceNumber=await runTransaction(db,async tx=>{
-    const counter=await tx.get(counterRef); const next=(counter.data()?.value||0)+1;
-    tx.set(counterRef,{value:next,updatedAt:serverTimestamp()},{merge:true});
+    const counter=await tx.get(counterRef); const counterData=counter.data();
+    const next=(counterData?.value||0)+1;
+    const attendanceCount=(counterData?.[draft.attendanceType]||0)+1;
+    if(attendanceCount>attendance.capacity)throw new Error(`The ${attendance.label} option has reached its participant limit.`);
+    tx.set(counterRef,{value:next,[draft.attendanceType]:attendanceCount,updatedAt:serverTimestamp()},{merge:true});
     tx.set(registrationRef,{
       id:registrationId,programId:PROGRAM_ID,ownerUid:user.uid,referenceNumber:`PRS2026-${String(next).padStart(4,"0")}`,
       fullName:draft.fullName.trim().toUpperCase(),identificationNumber:draft.identificationNumber.trim(),email:draft.email.trim().toLowerCase(),phoneNumber:draft.phoneNumber.trim(),
