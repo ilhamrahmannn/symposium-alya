@@ -64,6 +64,7 @@ async function registrationEmail(request: Request, env: Env) {
   const attendance = String(firestoreValue(fields.attendanceLabel));
   const fee = Number(firestoreValue(fields.registrationFeeInSen));
   const isConfirmed = input.type === "confirmed";
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return Response.json({ sent: false, error: "Registration email is invalid" }, { status: 422 });
   const qrDataUrl = await QRCode.toDataURL(reference, { width: 360, margin: 1, errorCorrectionLevel: "H" });
   const qrBase64 = qrDataUrl.split(",")[1];
   const subject = isConfirmed ? `Registration confirmed - ${reference}` : `Registration received - ${reference}`;

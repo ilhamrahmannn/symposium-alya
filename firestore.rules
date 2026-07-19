@@ -43,17 +43,23 @@ service cloud.firestore {
 
       match /public/{documentId} { allow read: if true; allow write: if isAdmin(programId); }
       match /members/{userId} {
-        allow read: if isMember(programId);
+        allow read: if isMember(programId) || (signedIn() && userId == request.auth.uid);
         allow create: if isAdmin(programId) && request.resource.data.role in ['admin','viewer'] && request.resource.data.active is bool;
         allow update: if isAdmin(programId) && userId != request.auth.uid && request.resource.data.role in ['admin','viewer'] && request.resource.data.active is bool;
         allow delete: if isAdmin(programId) && userId != request.auth.uid;
       }
       match /accessRequests/{userId} {
-        allow read: if isAdmin(programId);
+        allow read: if isAdmin(programId) || (signedIn() && userId == request.auth.uid);
         allow create: if signedIn() && request.auth.uid == userId && request.auth.token.firebase.sign_in_provider != 'anonymous'
           && request.resource.data.uid == request.auth.uid && request.resource.data.status == 'pending'
           && request.resource.data.requestedRole == 'viewer' && request.resource.data.email is string;
-        allow update: if isAdmin(programId) && request.resource.data.uid == resource.data.uid && request.resource.data.email == resource.data.email;
+        allow update: if (isAdmin(programId) && request.resource.data.uid == resource.data.uid && request.resource.data.email == resource.data.email)
+          || (signedIn() && request.auth.uid == userId && request.auth.token.firebase.sign_in_provider != 'anonymous'
+            && request.resource.data.uid == resource.data.uid
+            && request.resource.data.status == 'pending'
+            && request.resource.data.requestedRole == 'viewer'
+            && request.resource.data.email is string
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['email','fullName','status','requestedRole','requestedAt','updatedAt']));
         allow delete: if false;
       }
       match /transactions/{id} {
@@ -68,12 +74,12 @@ service cloud.firestore {
         allow read: if isAdmin(programId) || (signedIn() && resource.data.ownerUid == request.auth.uid);
         allow create: if validPublicRegistration(programId);
         allow update: if isAdmin(programId) || (signedIn() && resource.data.ownerUid == request.auth.uid && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['proofOfPaymentPath','updatedAt']) && resource.data.proofOfPaymentPath == '');
-        allow delete: if false;
+        allow delete: if isAdmin(programId) && resource.data.registrationStatus == 'rejected' && resource.data.paymentStatus == 'rejected' && resource.data.linkedTransactionId == null;
       }
       match /counters/registrations {
         allow read: if signedIn();
         allow create: if signedIn() && request.resource.data.value == 1;
-        allow update: if signedIn() && request.resource.data.value == resource.data.value + 1;
+        allow update: if isAdmin(programId) || (signedIn() && request.resource.data.value == resource.data.value + 1);
         allow delete: if false;
       }
     }

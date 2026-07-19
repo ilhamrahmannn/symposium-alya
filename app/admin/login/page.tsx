@@ -27,11 +27,12 @@ function authMessage(error: unknown) {
 }
 
 async function createAccessRequest(user: User, fullName?: string) {
-  if (!db) return;
+  if (!db) throw { code: "configuration-not-found" };
   const member = await getDoc(doc(db, "programs", PROGRAM_ID, "members", user.uid));
-  if (member.exists()) return;
+  if (member.exists() && member.data()?.active === true) return "member" as const;
   const requestRef = doc(db, "programs", PROGRAM_ID, "accessRequests", user.uid);
-  if ((await getDoc(requestRef)).exists()) return;
+  const existing = await getDoc(requestRef);
+  if (existing.exists() && existing.data()?.status === "pending") return "pending" as const;
   await setDoc(requestRef, {
     uid: user.uid,
     email: user.email || "",
@@ -40,7 +41,8 @@ async function createAccessRequest(user: User, fullName?: string) {
     requestedRole: "viewer",
     requestedAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
-  });
+  }, { merge: existing.exists() });
+  return "created" as const;
 }
 
 async function authorised(user: User) {
@@ -69,9 +71,9 @@ export default function AdminLogin() {
       router.replace(destination);
       return;
     }
-    await createAccessRequest(user);
+    const requestStatus = await createAccessRequest(user);
     await firebaseSignOut();
-    setWarning("Not authorised. This Firebase account has not been activated as a program member.");
+    setWarning(requestStatus === "pending" ? "Your access request is still awaiting administrator approval." : "Not authorised. A new access request has been sent to the program administrator.");
   };
 
   const submit = async () => {
@@ -83,9 +85,9 @@ export default function AdminLogin() {
       if (mode === "signup") {
         if (!fullName.trim()) throw { code: "name-required" };
         const result = await emailSignUp(fullName, email, password);
-        await createAccessRequest(result.user, fullName);
+        const requestStatus = await createAccessRequest(result.user, fullName);
         await firebaseSignOut();
-        setMessage("Account created. An administrator must approve your access before you can sign in.");
+        setMessage(requestStatus === "pending" ? "Account created. Your existing access request is awaiting administrator approval." : "Account created and access request sent. An administrator must approve it before you can sign in.");
         setMode("login");
         setPassword("");
       } else {
