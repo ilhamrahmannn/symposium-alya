@@ -7,6 +7,37 @@ service cloud.firestore {
     function isAdmin(programId) { return isMember(programId) && get(memberPath(programId)).data.role == 'admin'; }
     function positiveSen(value) { return value is int && value > 0; }
     function registrationOpen(programId) { return !exists(/databases/$(database)/documents/programs/$(programId)/public/event) || get(/databases/$(database)/documents/programs/$(programId)/public/event).data.registrationEnabled != false; }
+    function registrationCounterPath(programId) { return /databases/$(database)/documents/programs/$(programId)/counters/registrations; }
+    function validPublicCounterCreate() {
+      return request.resource.data.value == 1
+        && request.resource.data.get('day1', 0) + request.resource.data.get('full', 0) == 1
+        && request.resource.data.get('day1', 0) <= 150
+        && request.resource.data.get('full', 0) <= 15;
+    }
+    function validPublicCounterUpdate() {
+      return request.resource.data.value == resource.data.value + 1
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['value','day1','full','updatedAt'])
+        && request.resource.data.get('day1', 0) <= 150
+        && request.resource.data.get('full', 0) <= 15
+        && ((request.resource.data.get('day1', 0) == resource.data.get('day1', 0) + 1
+          && request.resource.data.get('full', 0) == resource.data.get('full', 0))
+          || (request.resource.data.get('full', 0) == resource.data.get('full', 0) + 1
+          && request.resource.data.get('day1', 0) == resource.data.get('day1', 0)));
+    }
+    function registrationCounterAdvanced(programId, attendanceType) {
+      let path = registrationCounterPath(programId);
+      let before = exists(path) ? get(path).data : {};
+      let after = getAfter(path).data;
+      return after.value == before.get('value', 0) + 1
+        && after.get('day1', 0) <= 150
+        && after.get('full', 0) <= 15
+        && ((attendanceType == 'day1'
+          && after.get('day1', 0) == before.get('day1', 0) + 1
+          && after.get('full', 0) == before.get('full', 0))
+          || (attendanceType == 'full'
+          && after.get('full', 0) == before.get('full', 0) + 1
+          && after.get('day1', 0) == before.get('day1', 0)));
+    }
     function validTransaction(programId) {
       return request.resource.data.programId == programId
         && request.resource.data.type in ['income','expense','refund','adjustment']
@@ -33,7 +64,8 @@ service cloud.firestore {
         && request.resource.data.privacyConsent == true
         && request.resource.data.informationConfirmation == true
         && request.resource.data.termsAccepted == true
-        && request.resource.data.linkedTransactionId == null;
+        && request.resource.data.linkedTransactionId == null
+        && registrationCounterAdvanced(programId, request.resource.data.attendanceType);
     }
 
     match /programs/{programId} {
@@ -78,8 +110,8 @@ service cloud.firestore {
       }
       match /counters/registrations {
         allow read: if signedIn();
-        allow create: if signedIn() && request.resource.data.value == 1;
-        allow update: if isAdmin(programId) || (signedIn() && request.resource.data.value == resource.data.value + 1);
+        allow create: if signedIn() && validPublicCounterCreate();
+        allow update: if isAdmin(programId) || (signedIn() && validPublicCounterUpdate());
         allow delete: if false;
       }
     }
