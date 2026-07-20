@@ -6,12 +6,12 @@ const jakarta = Plus_Jakarta_Sans({ variable: "--font-jakarta", subsets: ["latin
 
 export const metadata: Metadata = {
   title: "Pierre Robin Sequence Symposium & Workshop 2026",
-  description: "Register for the Symposium on Management of Pierre Robin Sequence in Infants 2026: From Airway to Oral Rehabilitation — A Collaborative Approach.",
+  description: "Register for the Symposium on Management of Pierre Robin Sequence in Infants 2026: Connecting Disciplines, Transforming Care — A Integrated Approach to Pierre Robin Sequence.",
   metadataBase: process.env.NEXT_PUBLIC_SITE_URL ? new URL(process.env.NEXT_PUBLIC_SITE_URL) : undefined,
   alternates: { canonical: "/" },
   openGraph: {
     title: "Pierre Robin Sequence Symposium & Workshop 2026",
-    description: "From Airway to Oral Rehabilitation — A Collaborative Approach.",
+    description: "Connecting Disciplines, Transforming Care — A Integrated Approach to Pierre Robin Sequence.",
     type: "website",
     url: "/",
   },

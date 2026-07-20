@@ -42,7 +42,7 @@ function escapeHtml(value: unknown) {
 }
 
 const EVENT_TITLE = "Symposium on Management of Pierre Robin Sequence in Infants 2026";
-const EVENT_SUBTITLE = "From Airway to Oral Rehabilitation: A Collaborative Approach";
+const EVENT_SUBTITLE = "Connecting Disciplines, Transforming Care: A Integrated Approach to Pierre Robin Sequence";
 
 function formatDocumentDate(value: string) {
   const date = value ? new Date(value) : new Date();

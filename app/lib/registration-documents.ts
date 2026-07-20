@@ -10,7 +10,7 @@ export type RegistrationDocumentData = {
 };
 
 const EVENT_TITLE = "Symposium on Management of Pierre Robin Sequence in Infants 2026";
-const EVENT_SUBTITLE = "From Airway to Oral Rehabilitation: A Collaborative Approach";
+const EVENT_SUBTITLE = "Connecting Disciplines, Transforming Care: A Integrated Approach to Pierre Robin Sequence";
 
 function addHeader(pdf: jsPDF, documentTitle: string) {
   pdf.setFillColor(7, 7, 7);
