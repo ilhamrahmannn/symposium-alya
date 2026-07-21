@@ -106,7 +106,9 @@ service cloud.firestore {
         allow read: if isAdmin(programId) || (signedIn() && resource.data.ownerUid == request.auth.uid);
         allow create: if validPublicRegistration(programId);
         allow update: if isAdmin(programId) || (signedIn() && resource.data.ownerUid == request.auth.uid && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['proofOfPaymentPath','updatedAt']) && resource.data.proofOfPaymentPath == '');
-        allow delete: if isAdmin(programId) && resource.data.registrationStatus == 'rejected' && resource.data.paymentStatus == 'rejected' && resource.data.linkedTransactionId == null;
+        allow delete: if isAdmin(programId)
+          && (resource.data.linkedTransactionId == null
+            || getAfter(/databases/$(database)/documents/programs/$(programId)/transactions/$(resource.data.linkedTransactionId)).data.status == 'cancelled');
       }
       match /counters/registrations {
         allow read: if signedIn();

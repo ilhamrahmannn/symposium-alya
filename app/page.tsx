@@ -51,17 +51,17 @@ const dayOneProgramme=[
   ["8:00am - 8:30am","Registration & Breakfast"],
   ["8:30am - 9:30am","Lecture 1: Current Perspectives in the Multidisciplinary Management of Pierre Robin Sequence","Prof Dr Firdaus Hariri"],
   ["9:30am - 9:45am","Opening Ceremony","Officiated by Dr Juana Bahadun (Head of Johor State Paediatric Dentistry Services)"],
-  ["9:45am - 10:30am","Lecture 2: Early Recognition and Neonatal Management of Pierre Robin Sequence","Dr Chia Le Ser"],
-  ["10:30am - 10:45am","Morning Break"],
-  ["10:45am - 11:30am","Lecture 3: Airway Assessment and Respiratory Management in Infants with Pierre Robin Sequence","Dr Liew Zheyi"],
-  ["11:30am - 12:15pm","Lecture 4: Airway Evaluation and Intervention in Pierre Robin Sequence","Dr Selvamalar Vengathajalam"],
-  ["12:15pm - 1:00pm","Lecture 5: Non-Surgical Management of Infants with Pierre Robin Sequence","Dr Halimah Mohamed Noor"],
-  ["1:00pm - 2:00pm","Lunch, Prayer & Break"],
-  ["2:00pm - 2:45pm","Lecture 6: Surgical Considerations in Pierre Robin Sequence","Dr Sundararajan Naidu Ramasamy"],
-  ["2:45pm - 3:30pm","Case Discussion"],
-  ["3:30pm - 4:00pm","Session to be announced"],
-  ["4:00pm - 4:15pm","Q&A"],
-  ["4:15pm","End of Programme"],
+  ["9:45am - 10:45am","Lecture 2: Early Recognition and Neonatal Management of Pierre Robin Sequence","Dr Chia Le Ser"],
+  ["10:45am - 11:00am","Morning Break"],
+  ["11:00am - 12:00pm","Lecture 3: Airway Assessment and Respiratory Management in Infants with Pierre Robin Sequence","Dr Liew Zheyi"],
+  ["12:00pm - 1:00pm","Lecture 4: Airway Evaluation and Intervention in Pierre Robin Sequence","Dr Selvamalar Vengathajalam"],
+  ["1:00pm - 2:00pm","Lecture 5: Non-Surgical Management of Infants with Pierre Robin Sequence","Dr Halimah Mohamed Noor"],
+  ["2:00pm - 3:00pm","Lunch, Prayer & Break"],
+  ["3:00pm - 4:00pm","Lecture 6: Surgical Considerations in Pierre Robin Sequence","Dr Sundararajan Naidu Ramasamy"],
+  ["4:00pm - 4:45pm","Case Discussion"],
+  ["4:45pm - 5:15pm","Session to be announced"],
+  ["5:15pm - 5:30pm","Q&A"],
+  ["5:30pm","End of Programme"],
 ] as const;
 const dayTwoProgramme=[
   ["8:00am - 8:30am","Registration & Breakfast"],
@@ -82,7 +82,7 @@ export default function EventHomepage(){
   const [selectedDiscipline,setSelectedDiscipline]=useState<Discipline|null>(null);
   const [speakerBrief,setSpeakerBrief]=useState<SpeakerBrief|null>(null);
   const [activeProgrammeDay,setActiveProgrammeDay]=useState<1|2>(1);
-  const lastTrigger=useRef<HTMLButtonElement|null>(null);
+  const lastTrigger=useRef<ButtonElement|null>(null);
   useEffect(()=>{if(!db)return;return onSnapshot(doc(db,"programs",PROGRAM_ID,"public","event"),snap=>setSettings(snap.data()||{}))},[]);
   useEffect(()=>{if(!selectedDiscipline)return;const previous=document.body.style.overflow;document.body.style.overflow="hidden";const escape=(event:KeyboardEvent)=>{if(event.key!=="Escape")return;if(speakerBrief){setSpeakerBrief(null);return}setSelectedDiscipline(null);requestAnimationFrame(()=>lastTrigger.current?.focus())};window.addEventListener("keydown",escape);return()=>{document.body.style.overflow=previous;window.removeEventListener("keydown",escape)}},[selectedDiscipline,speakerBrief]);
   const closeSpeakers=()=>{setSpeakerBrief(null);setSelectedDiscipline(null);requestAnimationFrame(()=>lastTrigger.current?.focus())};
