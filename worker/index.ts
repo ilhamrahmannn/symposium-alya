@@ -21,6 +21,7 @@ interface Env {
   GMAIL_CLIENT_SECRET?: string;
   GMAIL_REFRESH_TOKEN?: string;
   GMAIL_SENDER_EMAIL?: string;
+  ADMIN_NOTIFICATION_EMAILS?: string;
   PUBLIC_SITE_URL?: string;
   FIREBASE_PROJECT_ID?: string;
   PROGRAM_ID?: string;
@@ -131,8 +132,15 @@ async function sendWithGmail(env: Env, input: {
   return sendResponse.ok ? new Response(null, { status: 204 }) : new Response("Gmail rejected the request", { status: 502 });
 }
 
+function adminNotificationRecipients(env: Env) {
+  return (env.ADMIN_NOTIFICATION_EMAILS || "anisaalya1011@gmail.com,paeddental@hsi.gov.my")
+    .split(",")
+    .map(email => email.trim().toLowerCase())
+    .filter(email => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email));
+}
+
 const EVENT_TITLE = "Symposium on Management of Pierre Robin Sequence in Infants 2026";
-const EVENT_SUBTITLE = "Connecting Disciplines, Transforming Care: A Integrated Approach to Pierre Robin Sequence";
+const EVENT_SUBTITLE = "Connecting Disciplines, Transforming Care: An Integrated Approach to Pierre Robin Sequence";
 
 function formatDocumentDate(value: string) {
   const date = value ? new Date(value) : new Date();
@@ -247,6 +255,9 @@ async function registrationEmail(request: Request, env: Env) {
     : "Your form and proof of payment have been received. Your registration remains pending until payment verification is completed.";
   const siteUrl = env.PUBLIC_SITE_URL || new URL(request.url).origin;
   const html = `<!doctype html><html><body style="margin:0;background:#070707;color:#fff;font-family:Arial,sans-serif"><div style="max-width:620px;margin:auto;padding:36px"><p style="color:#d4af37;letter-spacing:2px;font-size:12px">PRS SYMPOSIUM & WORKSHOP 2026</p><h1>${heading}</h1><p style="color:#c9c5bc;line-height:1.7">Dear ${escapeHtml(fullName)},</p><p style="color:#c9c5bc;line-height:1.7">${message}</p><div style="margin:26px 0;padding:22px;border:1px solid rgba(212,175,55,.35);border-radius:14px;background:#111"><p><small style="color:#8e8a82">REFERENCE NUMBER</small><br><strong style="color:#f4d35e;font-size:20px">${escapeHtml(reference)}</strong></p><p><small style="color:#8e8a82">ATTENDANCE</small><br>${escapeHtml(attendance)}</p><p><small style="color:#8e8a82">REGISTRATION FEE</small><br>RM ${(fee / 100).toFixed(2)}</p><p><small style="color:#8e8a82">STATUS</small><br>${isConfirmed ? "Confirmed - Payment Verified" : "Pending Payment Verification"}</p></div><p style="color:#8e8a82;font-size:12px">QR reference is attached to this email. Visit <a style="color:#d4af37" href="${escapeHtml(siteUrl)}">the event website</a> for event updates.</p></div></body></html>`;
+  const adminUrl = `${siteUrl.replace(/\/$/, "")}/admin/registrations`;
+  const adminSubject = `New registration awaiting verification - ${reference}`;
+  const adminHtml = `<!doctype html><html><body style="margin:0;background:#fff8fa;color:#2d2025;font-family:Arial,sans-serif"><div style="max-width:620px;margin:auto;padding:36px"><p style="color:#be5678;letter-spacing:2px;font-size:12px;font-weight:bold">PRS SYMPOSIUM 2026 · ADMIN NOTIFICATION</p><h1 style="margin-bottom:8px">New registration received</h1><p style="color:#7c6870;line-height:1.7">A participant has submitted a registration and proof of payment. The payment is awaiting administrator verification.</p><div style="margin:26px 0;padding:22px;border:1px solid #f1cbd8;border-radius:14px;background:#fff"><p><small style="color:#a48f97">REFERENCE NUMBER</small><br><strong style="color:#be5678;font-size:20px">${escapeHtml(reference)}</strong></p><p><small style="color:#a48f97">PARTICIPANT</small><br><strong>${escapeHtml(fullName)}</strong></p><p><small style="color:#a48f97">EMAIL</small><br>${escapeHtml(email)}</p><p><small style="color:#a48f97">ATTENDANCE</small><br>${escapeHtml(attendance)}</p><p><small style="color:#a48f97">REGISTRATION FEE</small><br>RM ${(fee / 100).toFixed(2)}</p><p><small style="color:#a48f97">STATUS</small><br>Pending Payment Verification</p></div><a href="${escapeHtml(adminUrl)}" style="display:inline-block;padding:14px 22px;border-radius:10px;background:#be5678;color:#fff;text-decoration:none;font-weight:bold">Open Admin Registrations</a><p style="margin-top:24px;color:#a48f97;font-size:12px;line-height:1.6">Sign-in and Admin access are required. Sensitive identification information and payment proof are available only inside the protected admin page.</p></div></body></html>`;
   const registrationPdf = await registrationPdfBase64({ reference, fullName, attendance, fee, documentDate: isConfirmed ? verifiedAt : submittedAt, confirmed: isConfirmed });
   const attachments = [
     { filename: `${reference}-qr.png`, content: qrBase64, contentType: "image/png" },
@@ -254,11 +265,29 @@ async function registrationEmail(request: Request, env: Env) {
   ];
   const gmailResponse = await sendWithGmail(env, { to: email, subject, html, attachments });
   if (gmailResponse && !gmailResponse.ok) return Response.json({ sent: false, error: "Email provider rejected the request" }, { status: 502 });
-  if (gmailResponse) return Response.json({ sent: true, provider: "gmail" });
+  if (gmailResponse) {
+    let adminNotified = false;
+    if (!isConfirmed) {
+      const recipients = adminNotificationRecipients(env);
+      const adminResponse = recipients.length
+        ? await sendWithGmail(env, { to: recipients.join(", "), subject: adminSubject, html: adminHtml, attachments: [] })
+        : null;
+      adminNotified = Boolean(adminResponse?.ok);
+    }
+    return Response.json({ sent: true, provider: "gmail", adminNotified: isConfirmed ? undefined : adminNotified });
+  }
 
   const sendResponse = await fetch("https://api.resend.com/emails", { method: "POST", headers: { Authorization: `Bearer ${env.RESEND_API_KEY}`, "Content-Type": "application/json" }, body: JSON.stringify({ from: env.EMAIL_FROM_ADDRESS, reply_to: env.EMAIL_REPLY_TO || undefined, to: [email], subject, html, attachments }) });
   if (!sendResponse.ok) return Response.json({ sent: false, error: "Email provider rejected the request" }, { status: 502 });
-  return Response.json({ sent: true });
+  let adminNotified = false;
+  if (!isConfirmed) {
+    const recipients = adminNotificationRecipients(env);
+    if (recipients.length) {
+      const adminResponse = await fetch("https://api.resend.com/emails", { method: "POST", headers: { Authorization: `Bearer ${env.RESEND_API_KEY}`, "Content-Type": "application/json" }, body: JSON.stringify({ from: env.EMAIL_FROM_ADDRESS, reply_to: env.EMAIL_REPLY_TO || undefined, to: recipients, subject: adminSubject, html: adminHtml }) });
+      adminNotified = adminResponse.ok;
+    }
+  }
+  return Response.json({ sent: true, provider: "resend", adminNotified: isConfirmed ? undefined : adminNotified });
 }
 
 // Image security config. SVG sources with .svg extension auto-skip the
