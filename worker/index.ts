@@ -17,6 +17,10 @@ interface Env {
   RESEND_API_KEY?: string;
   EMAIL_FROM_ADDRESS?: string;
   EMAIL_REPLY_TO?: string;
+  GMAIL_CLIENT_ID?: string;
+  GMAIL_CLIENT_SECRET?: string;
+  GMAIL_REFRESH_TOKEN?: string;
+  GMAIL_SENDER_EMAIL?: string;
   PUBLIC_SITE_URL?: string;
   FIREBASE_PROJECT_ID?: string;
   PROGRAM_ID?: string;
@@ -39,6 +43,92 @@ function firestoreValue(value: FirestoreValue | undefined) {
 
 function escapeHtml(value: unknown) {
   return String(value ?? "").replace(/[&<>"']/g, character => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" }[character] ?? character));
+}
+
+function safeEmailHeader(value: string) {
+  return value.replace(/[\r\n]+/g, " ").trim();
+}
+
+function chunkBase64(value: string) {
+  return value.replace(/\s+/g, "").match(/.{1,76}/g)?.join("\r\n") ?? "";
+}
+
+function utf8Base64(value: string) {
+  const bytes = new TextEncoder().encode(value);
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary);
+}
+
+function base64Url(value: string) {
+  return utf8Base64(value).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+}
+
+type EmailAttachment = { filename: string; content: string; contentType?: string };
+
+function createMimeMessage(input: {
+  from: string;
+  to: string;
+  replyTo?: string;
+  subject: string;
+  html: string;
+  attachments: EmailAttachment[];
+}) {
+  const boundary = `prs_${crypto.randomUUID().replace(/-/g, "")}`;
+  const headers = [
+    `From: PRS Symposium 2026 <${safeEmailHeader(input.from)}>`,
+    `To: ${safeEmailHeader(input.to)}`,
+    input.replyTo ? `Reply-To: ${safeEmailHeader(input.replyTo)}` : "",
+    `Subject: ${safeEmailHeader(input.subject)}`,
+    "MIME-Version: 1.0",
+    `Content-Type: multipart/mixed; boundary=\"${boundary}\"`,
+  ].filter(Boolean);
+  const parts = [
+    `--${boundary}\r\nContent-Type: text/html; charset=UTF-8\r\nContent-Transfer-Encoding: base64\r\n\r\n${chunkBase64(utf8Base64(input.html))}`,
+    ...input.attachments.map(attachment => {
+      const filename = safeEmailHeader(attachment.filename).replace(/[\"\\]/g, "_");
+      return `--${boundary}\r\nContent-Type: ${attachment.contentType || "application/octet-stream"}; name=\"${filename}\"\r\nContent-Disposition: attachment; filename=\"${filename}\"\r\nContent-Transfer-Encoding: base64\r\n\r\n${chunkBase64(attachment.content)}`;
+    }),
+    `--${boundary}--`,
+  ];
+  return `${headers.join("\r\n")}\r\n\r\n${parts.join("\r\n")}`;
+}
+
+async function sendWithGmail(env: Env, input: {
+  to: string;
+  subject: string;
+  html: string;
+  attachments: EmailAttachment[];
+}) {
+  if (!env.GMAIL_CLIENT_ID || !env.GMAIL_CLIENT_SECRET || !env.GMAIL_REFRESH_TOKEN || !env.GMAIL_SENDER_EMAIL) return null;
+  const tokenResponse = await fetch("https://oauth2.googleapis.com/token", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      client_id: env.GMAIL_CLIENT_ID,
+      client_secret: env.GMAIL_CLIENT_SECRET,
+      refresh_token: env.GMAIL_REFRESH_TOKEN,
+      grant_type: "refresh_token",
+    }),
+  });
+  if (!tokenResponse.ok) return new Response("Gmail authorization failed", { status: 502 });
+  const tokenData = await tokenResponse.json() as { access_token?: string };
+  if (!tokenData.access_token) return new Response("Gmail authorization failed", { status: 502 });
+
+  const mime = createMimeMessage({
+    from: env.GMAIL_SENDER_EMAIL,
+    to: input.to,
+    replyTo: env.EMAIL_REPLY_TO,
+    subject: input.subject,
+    html: input.html,
+    attachments: input.attachments,
+  });
+  const sendResponse = await fetch("https://gmail.googleapis.com/gmail/v1/users/me/messages/send", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${tokenData.access_token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ raw: base64Url(mime) }),
+  });
+  return sendResponse.ok ? new Response(null, { status: 204 }) : new Response("Gmail rejected the request", { status: 502 });
 }
 
 const EVENT_TITLE = "Symposium on Management of Pierre Robin Sequence in Infants 2026";
@@ -135,7 +225,9 @@ async function registrationEmail(request: Request, env: Env) {
   const fields = document.fields || {};
   const status = String(firestoreValue(fields.registrationStatus));
   if (input.type === "confirmed" && status !== "confirmed") return Response.json({ sent: false, error: "Registration is not confirmed" }, { status: 409 });
-  if (!env.RESEND_API_KEY || !env.EMAIL_FROM_ADDRESS) return Response.json({ sent: false, configured: false }, { status: 202 });
+  const gmailConfigured = Boolean(env.GMAIL_CLIENT_ID && env.GMAIL_CLIENT_SECRET && env.GMAIL_REFRESH_TOKEN && env.GMAIL_SENDER_EMAIL);
+  const resendConfigured = Boolean(env.RESEND_API_KEY && env.EMAIL_FROM_ADDRESS);
+  if (!gmailConfigured && !resendConfigured) return Response.json({ sent: false, configured: false }, { status: 202 });
 
   const reference = String(firestoreValue(fields.referenceNumber));
   const fullName = String(firestoreValue(fields.fullName));
@@ -157,9 +249,13 @@ async function registrationEmail(request: Request, env: Env) {
   const html = `<!doctype html><html><body style="margin:0;background:#070707;color:#fff;font-family:Arial,sans-serif"><div style="max-width:620px;margin:auto;padding:36px"><p style="color:#d4af37;letter-spacing:2px;font-size:12px">PRS SYMPOSIUM & WORKSHOP 2026</p><h1>${heading}</h1><p style="color:#c9c5bc;line-height:1.7">Dear ${escapeHtml(fullName)},</p><p style="color:#c9c5bc;line-height:1.7">${message}</p><div style="margin:26px 0;padding:22px;border:1px solid rgba(212,175,55,.35);border-radius:14px;background:#111"><p><small style="color:#8e8a82">REFERENCE NUMBER</small><br><strong style="color:#f4d35e;font-size:20px">${escapeHtml(reference)}</strong></p><p><small style="color:#8e8a82">ATTENDANCE</small><br>${escapeHtml(attendance)}</p><p><small style="color:#8e8a82">REGISTRATION FEE</small><br>RM ${(fee / 100).toFixed(2)}</p><p><small style="color:#8e8a82">STATUS</small><br>${isConfirmed ? "Confirmed - Payment Verified" : "Pending Payment Verification"}</p></div><p style="color:#8e8a82;font-size:12px">QR reference is attached to this email. Visit <a style="color:#d4af37" href="${escapeHtml(siteUrl)}">the event website</a> for event updates.</p></div></body></html>`;
   const registrationPdf = await registrationPdfBase64({ reference, fullName, attendance, fee, documentDate: isConfirmed ? verifiedAt : submittedAt, confirmed: isConfirmed });
   const attachments = [
-    { filename: `${reference}-qr.png`, content: qrBase64 },
-    { filename: `${reference}-${isConfirmed ? "confirmation-letter" : "acknowledgement"}.pdf`, content: registrationPdf },
+    { filename: `${reference}-qr.png`, content: qrBase64, contentType: "image/png" },
+    { filename: `${reference}-${isConfirmed ? "confirmation-letter" : "acknowledgement"}.pdf`, content: registrationPdf, contentType: "application/pdf" },
   ];
+  const gmailResponse = await sendWithGmail(env, { to: email, subject, html, attachments });
+  if (gmailResponse && !gmailResponse.ok) return Response.json({ sent: false, error: "Email provider rejected the request" }, { status: 502 });
+  if (gmailResponse) return Response.json({ sent: true, provider: "gmail" });
+
   const sendResponse = await fetch("https://api.resend.com/emails", { method: "POST", headers: { Authorization: `Bearer ${env.RESEND_API_KEY}`, "Content-Type": "application/json" }, body: JSON.stringify({ from: env.EMAIL_FROM_ADDRESS, reply_to: env.EMAIL_REPLY_TO || undefined, to: [email], subject, html, attachments }) });
   if (!sendResponse.ok) return Response.json({ sent: false, error: "Email provider rejected the request" }, { status: 502 });
   return Response.json({ sent: true });
