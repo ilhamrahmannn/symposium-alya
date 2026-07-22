@@ -32,7 +32,9 @@ export async function submitRegistration(draft:RegistrationDraft,onProgress:(val
     const counter=await tx.get(counterRef); const counterData=counter.data();
     const next=(counterData?.value||0)+1;
     const attendanceCount=(counterData?.[draft.attendanceType]||0)+1;
-    if(attendanceCount>attendance.capacity)throw new Error(`The ${attendance.label} option has reached its participant limit.`);
+    const totalDay1Attendance=(counterData?.day1||0)+(counterData?.full||0)+1;
+    if(totalDay1Attendance>150)throw new Error("Day 1 has reached its overall limit of 150 participants.");
+    if(draft.attendanceType==="full"&&attendanceCount>attendance.capacity)throw new Error(`The ${attendance.label} option has reached its participant limit.`);
     tx.set(counterRef,{value:next,[draft.attendanceType]:attendanceCount,updatedAt:serverTimestamp()},{merge:true});
     tx.set(registrationRef,{
       id:registrationId,programId:PROGRAM_ID,ownerUid:user.uid,referenceNumber:`PRS2026-${String(next).padStart(4,"0")}`,
