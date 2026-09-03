@@ -9,7 +9,16 @@ import { rm } from "../lib/finance";
 import { requestRegistrationEmail } from "../lib/registration-email";
 import { downloadConfirmationLetterPdf } from "../lib/registration-documents";
 
-type Registration={id:string;referenceNumber:string;fullName:string;identificationNumber:string;email:string;organisationType:string;workplace:string;expertise:string;attendanceType:string;attendanceLabel:string;registrationFeeInSen:number;paymentStatus:string;registrationStatus:string;submittedAt?:{toDate:()=>Date};proofOfPaymentPath:string;linkedTransactionId?:string};
+type FirestoreDate={toDate:()=>Date};
+type Registration={
+  id:string;referenceNumber:string;fullName:string;identificationNumber:string;email:string;phoneNumber:string;
+  organisationType:string;organisationTypeOther?:string;workplace:string;expertise:string;expertiseOther?:string;
+  foodPreference:string;foodPreferenceOther?:string;attendanceType:string;attendanceLabel:string;registrationFeeInSen:number;
+  proofOfPaymentPath:string;proofOfPaymentFileName?:string;paymentStatus:string;registrationStatus:string;
+  informationConfirmation?:boolean;privacyConsent?:boolean;termsAccepted?:boolean;rejectionReason?:string;
+  submittedAt?:FirestoreDate;createdAt?:FirestoreDate;updatedAt?:FirestoreDate;verifiedAt?:FirestoreDate;
+  verifiedBy?:string;linkedTransactionId?:string;
+};
 
 export default function AdminRegistrations({notify}:{notify:(message:string)=>void}) {
   const [rows,setRows]=useState<Registration[]>([]),[search,setSearch]=useState(""),[payment,setPayment]=useState("all"),[status,setStatus]=useState("all"),[selected,setSelected]=useState<Registration|null>(null),[error,setError]=useState("");
@@ -78,7 +87,35 @@ export default function AdminRegistrations({notify}:{notify:(message:string)=>vo
 
   const viewProof=async(row:Registration)=>{if(!storage||!row.proofOfPaymentPath)return;try{window.open(await getDownloadURL(ref(storage,row.proofOfPaymentPath)),"_blank","noopener,noreferrer")}catch{setError("The payment proof could not be opened.")}};
   const confirmationLetter=(row:Registration)=>downloadConfirmationLetterPdf({referenceNumber:row.referenceNumber,fullName:row.fullName,attendanceLabel:row.attendanceLabel,feeInSen:row.registrationFeeInSen,date:row.submittedAt?.toDate()||new Date()});
-  const csv=()=>{const lines=[["Reference Number","Participant Name","Email","Identification (Masked)","Organisation","Workplace","Expertise","Attendance","Fee (RM)","Payment Status","Registration Status","Submission Date"],...filtered.map(row=>[row.referenceNumber,row.fullName,row.email,maskIdentification(row.identificationNumber),row.organisationType,row.workplace,row.expertise,row.attendanceLabel,(row.registrationFeeInSen/100).toFixed(2),row.paymentStatus,row.registrationStatus,row.submittedAt?.toDate().toISOString()||""])].map(line=>line.map(value=>`"${String(value).replaceAll('"','""')}"`).join(",")).join("\n");const anchor=document.createElement("a");anchor.href=URL.createObjectURL(new Blob(["\ufeff",lines],{type:"text/csv;charset=utf-8"}));anchor.download="filtered-registrations.csv";anchor.click();URL.revokeObjectURL(anchor.href)};
+  const csv=()=>{
+    if(!confirm(`Download complete personal information for ${filtered.length} participant${filtered.length===1?"":"s"}? This file contains full identification numbers and must be stored securely.`))return;
+    const date=(value?:FirestoreDate)=>value?.toDate().toISOString()||"";
+    const yesNo=(value?:boolean)=>value===true?"Yes":"No";
+    const headers=[
+      "Reference Number","Full Name","Identification Number","Email Address","Phone Number",
+      "Organisation Type","Other Organisation Type","Workplace","Area of Expertise","Other Area of Expertise",
+      "Food Preference","Other Food Preference","Attendance Type","Attendance Label","Registration Fee (RM)",
+      "Proof of Payment File Name","Proof of Payment Available","Information Confirmed","Privacy Consent","Terms Accepted",
+      "Payment Status","Registration Status","Rejection Reason","Submission Date","Created Date","Last Updated Date",
+      "Verification Date","Verified By","Linked Transaction ID",
+    ];
+    const records=filtered.map(row=>[
+      row.referenceNumber,row.fullName,row.identificationNumber,row.email,row.phoneNumber,
+      row.organisationType,row.organisationTypeOther||"",row.workplace,row.expertise,row.expertiseOther||"",
+      row.foodPreference,row.foodPreferenceOther||"",row.attendanceType,row.attendanceLabel,(row.registrationFeeInSen/100).toFixed(2),
+      row.proofOfPaymentFileName||"",row.proofOfPaymentPath?"Yes":"No",yesNo(row.informationConfirmation),yesNo(row.privacyConsent),yesNo(row.termsAccepted),
+      row.paymentStatus,row.registrationStatus,row.rejectionReason||"",date(row.submittedAt),date(row.createdAt),date(row.updatedAt),
+      date(row.verifiedAt),row.verifiedBy||"",row.linkedTransactionId||"",
+    ]);
+    const lines=[headers,...records].map(line=>line.map(value=>`"${String(value??"").replaceAll('"','""')}"`).join(",")).join("\r\n");
+    const anchor=document.createElement("a");
+    const url=URL.createObjectURL(new Blob(["\ufeff",lines],{type:"text/csv;charset=utf-8"}));
+    anchor.href=url;
+    anchor.download=`prs-participant-full-details-${new Date().toISOString().slice(0,10)}.csv`;
+    anchor.click();
+    URL.revokeObjectURL(url);
+    notify(`${filtered.length} participant record${filtered.length===1?"":"s"} exported`);
+  };
 
   const actions=(row:Registration,mobile=false)=><>
     <button onClick={()=>setSelected(row)} className={mobile?undefined:"row-menu"} aria-label="View registration"><Eye/>{mobile&&"View Details"}</button>
@@ -89,7 +126,7 @@ export default function AdminRegistrations({notify}:{notify:(message:string)=>vo
   </>;
 
   return <>
-    <div className="page-heading"><div><span className="eyebrow">PARTICIPANT ADMINISTRATION</span><h1>Registrations</h1><p>Review submissions, verify payments and confirm participant places.</p></div><button className="premium-btn primary" onClick={csv}><Download/>Export CSV</button></div>
+    <div className="page-heading"><div><span className="eyebrow">PARTICIPANT ADMINISTRATION</span><h1>Registrations</h1><p>Review submissions, verify payments and confirm participant places.</p></div><button className="premium-btn primary" onClick={csv} disabled={filtered.length===0}><Download/>Export Full Details</button></div>
     <section className="budget-overview phase4-summary">{[["TOTAL REGISTRATIONS",rows.length],["PENDING VERIFICATION",rows.filter(row=>row.paymentStatus==="pending_verification").length],["CONFIRMED",rows.filter(row=>row.registrationStatus==="confirmed").length],["REJECTED",rows.filter(row=>row.registrationStatus==="rejected").length],["DAY 1 ATTENDANCE",rows.filter(row=>row.attendanceType==="day1"||row.attendanceType==="full").length],["FULL PROGRAMME",rows.filter(row=>row.attendanceType==="full").length],["EXPECTED INCOME",rm(expected)],["VERIFIED INCOME",rm(verified.reduce((sum,row)=>sum+row.registrationFeeInSen,0))]].map(([label,value])=><div key={label}><small>{label}</small><b>{value}</b></div>)}</section>
     {error&&<div className="budget-warning"><span>{error}</span><button onClick={()=>setError("")}><X/></button></div>}
     <div className="filter-bar"><div className="search-box"><Search/><input value={search} onChange={event=>setSearch(event.target.value)} placeholder="Search name, email or reference"/></div><select value={payment} onChange={event=>setPayment(event.target.value)}><option value="all">All payment statuses</option><option value="pending_verification">Pending verification</option><option value="verified">Verified</option><option value="rejected">Rejected</option></select><select value={status} onChange={event=>setStatus(event.target.value)}><option value="all">All registration statuses</option><option value="submitted">Submitted</option><option value="confirmed">Confirmed</option><option value="rejected">Rejected</option><option value="cancelled">Cancelled</option></select></div>
