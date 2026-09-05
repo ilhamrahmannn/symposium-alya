@@ -25,6 +25,7 @@ interface Env {
   PUBLIC_SITE_URL?: string;
   FIREBASE_PROJECT_ID?: string;
   PROGRAM_ID?: string;
+  TEST_REMINDER_TOKEN?: string;
 }
 
 interface ExecutionContext {
@@ -303,7 +304,7 @@ async function eventReminder(request: Request, env: Env) {
   const confirmed = results.filter(result => result.document).map(result => result.document?.fields || {});
   const recipients = confirmed.filter(fields => {
     const email = String(firestoreValue(fields.email));
-    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+    return firestoreValue(fields.testRecord) !== true && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
   });
   const siteUrl = env.PUBLIC_SITE_URL || new URL(request.url).origin;
   const calendar = eventCalendar(EVENT_TITLE, EVENT_SUBTITLE, venue, start, siteUrl);
@@ -327,6 +328,22 @@ async function eventReminder(request: Request, env: Env) {
     sent += batch.filter(result => result.status === "fulfilled" && result.value).length;
   }
   return Response.json({ sent, failed: confirmed.length - sent, total: confirmed.length });
+}
+
+
+async function testEventReminder(request: Request, env: Env) {
+  if (request.method !== "POST" || !env.TEST_REMINDER_TOKEN || request.headers.get("x-test-token") !== env.TEST_REMINDER_TOKEN) return new Response("Not found", { status: 404 });
+  const projectId=env.FIREBASE_PROJECT_ID||"symposium-alya",programId=env.PROGRAM_ID||"prs-symposium-2026";
+  const response=await fetch(`https://firestore.googleapis.com/v1/projects/${projectId}/databases/(default)/documents/programs/${programId}/public/event`);
+  const settings=await response.json() as {fields?:Record<string,FirestoreValue>};
+  const eventDate=String(firestoreValue(settings.fields?.eventDate)),eventTime=String(firestoreValue(settings.fields?.eventTime)),venue=String(firestoreValue(settings.fields?.venue)).trim(),start=calendarTimestamp(eventDate,eventTime);
+  if(!start||!venue)return Response.json({sent:false,error:"Event Settings is incomplete."},{status:422});
+  const siteUrl=env.PUBLIC_SITE_URL||"https://prssymposium2026.com",calendar=eventCalendar(EVENT_TITLE,EVENT_SUBTITLE,venue,start,siteUrl);
+  const date=new Date(`${eventDate}T00:00:00+08:00`).toLocaleDateString("en-MY",{dateStyle:"long",timeZone:"Asia/Kuala_Lumpur"});
+  const time=new Date(`${eventDate}T${eventTime}:00+08:00`).toLocaleTimeString("en-MY",{hour:"numeric",minute:"2-digit",timeZone:"Asia/Kuala_Lumpur"});
+  const html=`<!doctype html><html><body style="margin:0;background:#070707;color:#fff;font-family:Arial,sans-serif"><div style="max-width:620px;margin:auto;padding:36px"><p style="color:#d4af37;letter-spacing:2px;font-size:12px">PRS SYMPOSIUM &amp; WORKSHOP 2026</p><h1>Event Reminder  Test</h1><p>Dear ILHAM RAHMAN,</p><p>This is a test of the confirmed participant event reminder.</p><div style="margin:26px 0;padding:22px;border:1px solid #715f20;border-radius:14px;background:#111"><p>DATE<br><strong>${escapeHtml(date)}</strong></p><p>TIME<br><strong>${escapeHtml(time)}</strong></p><p>VENUE<br><strong>${escapeHtml(venue)}</strong></p></div><a href="${escapeHtml(calendar.googleUrl)}" style="display:inline-block;padding:14px 22px;border-radius:10px;background:#d4af37;color:#17130a;text-decoration:none;font-weight:bold">Add to Google Calendar</a><p style="color:#8e8a82;font-size:12px">For Apple Calendar or Outlook, open the attached ICS file.</p></div></body></html>`;
+  const gmail=await sendWithGmail(env,{to:"ilhamrahmannn@gmail.com",subject:`[TEST] Event reminder - ${EVENT_TITLE}`,html,attachments:[{filename:"prs-symposium-2026-test.ics",content:calendar.icsBase64,contentType:"text/calendar; charset=utf-8; method=PUBLISH"}]});
+  return Response.json({sent:Boolean(gmail?.ok),provider:"gmail"},{status:gmail?.ok?200:502});
 }
 
 async function registrationEmail(request: Request, env: Env) {
@@ -415,6 +432,7 @@ const worker = {
 
     if (url.pathname === "/api/registration-email") return registrationEmail(request, env);
     if (url.pathname === "/api/event-reminder") return eventReminder(request, env);
+    if (url.pathname === "/api/test-event-reminder") return testEventReminder(request, env);
 
     if (url.pathname === "/_vinext/image") {
       const allowedWidths = [...DEFAULT_DEVICE_SIZES, ...DEFAULT_IMAGE_SIZES];
