@@ -2,14 +2,15 @@
 import { useEffect, useMemo, useState } from "react";
 import { collection, doc, onSnapshot, query, runTransaction, serverTimestamp } from "firebase/firestore";
 import { deleteObject, getDownloadURL, ref } from "firebase/storage";
-import { Check, Download, Eye, FileDown, Search, Trash2, X } from "lucide-react";
+import { CalendarClock, Check, Download, Eye, FileDown, Search, Trash2, X } from "lucide-react";
 import { auth, db, storage } from "../lib/firebase";
 import { PROGRAM_ID, maskIdentification } from "../lib/registration";
 import { rm } from "../lib/finance";
-import { requestRegistrationEmail } from "../lib/registration-email";
+import { requestEventReminder, requestRegistrationEmail } from "../lib/registration-email";
 import { downloadConfirmationLetterPdf } from "../lib/registration-documents";
 
-type FirestoreDate={toDate:()=>Date};
+type FirestoreDate={toDate:()=>Date}|string;
+const registrationDate=(value?:FirestoreDate)=>{if(!value)return null;const date=typeof value==="string"?new Date(value):value.toDate();return Number.isNaN(date.getTime())?null:date};
 type Registration={
   id:string;referenceNumber:string;fullName:string;identificationNumber:string;email:string;phoneNumber:string;
   organisationType:string;organisationTypeOther?:string;workplace:string;expertise:string;expertiseOther?:string;
@@ -21,14 +22,14 @@ type Registration={
 };
 
 export default function AdminRegistrations({notify}:{notify:(message:string)=>void}) {
-  const [rows,setRows]=useState<Registration[]>([]),[search,setSearch]=useState(""),[payment,setPayment]=useState("all"),[status,setStatus]=useState("all"),[selected,setSelected]=useState<Registration|null>(null),[error,setError]=useState("");
+  const [rows,setRows]=useState<Registration[]>([]),[search,setSearch]=useState(""),[payment,setPayment]=useState("all"),[status,setStatus]=useState("all"),[selected,setSelected]=useState<Registration|null>(null),[error,setError]=useState(""),[sendingReminder,setSendingReminder]=useState(false);
 
   useEffect(()=>{
     if(!db)return;
     return onSnapshot(query(collection(db,"programs",PROGRAM_ID,"registrations")),snapshot=>setRows(snapshot.docs.map(item=>({...item.data(),id:item.id}) as Registration)),()=>setError("Registrations could not be loaded. Retry after checking your connection."));
   },[]);
 
-  const filtered=useMemo(()=>rows.filter(row=>(payment==="all"||row.paymentStatus===payment)&&(status==="all"||row.registrationStatus===status)&&`${row.fullName} ${row.email} ${row.referenceNumber}`.toLowerCase().includes(search.toLowerCase())).sort((a,b)=>(b.submittedAt?.toDate().getTime()||0)-(a.submittedAt?.toDate().getTime()||0)),[rows,search,payment,status]);
+  const filtered=useMemo(()=>rows.filter(row=>(payment==="all"||row.paymentStatus===payment)&&(status==="all"||row.registrationStatus===status)&&`${row.fullName} ${row.email} ${row.referenceNumber}`.toLowerCase().includes(search.toLowerCase())).sort((a,b)=>(registrationDate(b.submittedAt)?.getTime()||0)-(registrationDate(a.submittedAt)?.getTime()||0)),[rows,search,payment,status]);
   const verified=rows.filter(row=>row.paymentStatus==="verified");
   const expected=rows.filter(row=>row.registrationStatus!=="cancelled"&&row.registrationStatus!=="rejected").reduce((sum,row)=>sum+row.registrationFeeInSen,0);
 
@@ -86,10 +87,18 @@ export default function AdminRegistrations({notify}:{notify:(message:string)=>vo
   };
 
   const viewProof=async(row:Registration)=>{if(!storage||!row.proofOfPaymentPath)return;try{window.open(await getDownloadURL(ref(storage,row.proofOfPaymentPath)),"_blank","noopener,noreferrer")}catch{setError("The payment proof could not be opened.")}};
-  const confirmationLetter=(row:Registration)=>downloadConfirmationLetterPdf({referenceNumber:row.referenceNumber,fullName:row.fullName,attendanceLabel:row.attendanceLabel,feeInSen:row.registrationFeeInSen,date:row.submittedAt?.toDate()||new Date()});
+  const confirmationLetter=(row:Registration)=>downloadConfirmationLetterPdf({referenceNumber:row.referenceNumber,fullName:row.fullName,attendanceLabel:row.attendanceLabel,feeInSen:row.registrationFeeInSen,date:registrationDate(row.submittedAt)||new Date()});
+  const blastReminder=async()=>{
+    const confirmedCount=rows.filter(row=>row.registrationStatus==="confirmed").length;
+    if(!auth?.currentUser||confirmedCount===0||!confirm(`Send the event reminder to all ${confirmedCount} confirmed participant${confirmedCount===1?"":"s"}?`))return;
+    setSendingReminder(true);setError("");
+    try{const result=await requestEventReminder(auth.currentUser);notify(`Event reminder sent to ${result.sent} of ${result.total} confirmed participant${result.total===1?"":"s"}${result.failed?`; ${result.failed} failed`:""}`)}
+    catch(cause){setError(cause instanceof Error?cause.message:"Event reminder could not be sent.")}
+    finally{setSendingReminder(false)}
+  };
   const csv=()=>{
     if(!confirm(`Download complete personal information for ${filtered.length} participant${filtered.length===1?"":"s"}? This file contains full identification numbers and must be stored securely.`))return;
-    const date=(value?:FirestoreDate)=>value?.toDate().toISOString()||"";
+    const date=(value?:FirestoreDate)=>registrationDate(value)?.toISOString()||"";
     const yesNo=(value?:boolean)=>value===true?"Yes":"No";
     const headers=[
       "Reference Number","Full Name","Identification Number","Email Address","Phone Number",
@@ -126,12 +135,12 @@ export default function AdminRegistrations({notify}:{notify:(message:string)=>vo
   </>;
 
   return <>
-    <div className="page-heading"><div><span className="eyebrow">PARTICIPANT ADMINISTRATION</span><h1>Registrations</h1><p>Review submissions, verify payments and confirm participant places.</p></div><button className="premium-btn primary" onClick={csv} disabled={filtered.length===0}><Download/>Export Full Details</button></div>
+    <div className="page-heading"><div><span className="eyebrow">PARTICIPANT ADMINISTRATION</span><h1>Registrations</h1><p>Review submissions, verify payments and confirm participant places.</p></div><div className="heading-actions"><button className="premium-btn ghost" onClick={blastReminder} disabled={sendingReminder||rows.every(row=>row.registrationStatus!=="confirmed")}><CalendarClock/>{sendingReminder?"Sending Reminder...":"Blast Event Reminder"}</button><button className="premium-btn primary" onClick={csv} disabled={filtered.length===0}><Download/>Export Full Details</button></div></div>
     <section className="budget-overview phase4-summary">{[["TOTAL REGISTRATIONS",rows.length],["PENDING VERIFICATION",rows.filter(row=>row.paymentStatus==="pending_verification").length],["CONFIRMED",rows.filter(row=>row.registrationStatus==="confirmed").length],["REJECTED",rows.filter(row=>row.registrationStatus==="rejected").length],["DAY 1 ATTENDANCE",rows.filter(row=>row.attendanceType==="day1"||row.attendanceType==="full").length],["FULL PROGRAMME",rows.filter(row=>row.attendanceType==="full").length],["EXPECTED INCOME",rm(expected)],["VERIFIED INCOME",rm(verified.reduce((sum,row)=>sum+row.registrationFeeInSen,0))]].map(([label,value])=><div key={label}><small>{label}</small><b>{value}</b></div>)}</section>
     {error&&<div className="budget-warning"><span>{error}</span><button onClick={()=>setError("")}><X/></button></div>}
     <div className="filter-bar"><div className="search-box"><Search/><input value={search} onChange={event=>setSearch(event.target.value)} placeholder="Search name, email or reference"/></div><select value={payment} onChange={event=>setPayment(event.target.value)}><option value="all">All payment statuses</option><option value="pending_verification">Pending verification</option><option value="verified">Verified</option><option value="rejected">Rejected</option></select><select value={status} onChange={event=>setStatus(event.target.value)}><option value="all">All registration statuses</option><option value="submitted">Submitted</option><option value="confirmed">Confirmed</option><option value="rejected">Rejected</option><option value="cancelled">Cancelled</option></select></div>
-    <article className="finance-panel table-panel"><div className="table-meta"><b>{filtered.length} registrations</b><span>Identification numbers are masked by default</span></div><div className="transaction-table"><table><thead><tr><th>Reference</th><th>Participant</th><th>Organisation</th><th>Attendance</th><th>Fee</th><th>Payment</th><th>Registration</th><th>Submitted</th><th>Actions</th></tr></thead><tbody>{filtered.map(row=><tr key={row.id}><td><b>{row.referenceNumber}</b><small>{maskIdentification(row.identificationNumber)}</small></td><td><b>{row.fullName}</b><small>{row.email}</small></td><td><b>{row.organisationType}</b><small>{row.workplace}</small></td><td>{row.attendanceType==="full"?"Day 1 + 2":"Day 1"}</td><td>{rm(row.registrationFeeInSen)}</td><td><span className={`status ${row.paymentStatus}`}>{row.paymentStatus.replaceAll("_"," ")}</span></td><td><span className={`status ${row.registrationStatus}`}>{row.registrationStatus}</span></td><td>{row.submittedAt?.toDate().toLocaleDateString("en-MY")||"—"}</td><td>{actions(row)}</td></tr>)}</tbody></table></div></article>
-    <section className="mobile-registrations" aria-label="Mobile registration list">{filtered.length===0?<div className="mobile-registration-empty"><Search/><b>No registrations found</b><span>Clear or change the filters to see registrations.</span></div>:filtered.map(row=><article className="mobile-registration-card" key={row.id}><header><div><span>{row.referenceNumber}</span><h3>{row.fullName}</h3><p>{row.email}</p></div><span className={`status ${row.paymentStatus}`}>{row.paymentStatus.replaceAll("_"," ")}</span></header><dl><div><dt>Organisation</dt><dd>{row.organisationType}<small>{row.workplace}</small></dd></div><div><dt>Identification</dt><dd>{maskIdentification(row.identificationNumber)}</dd></div><div><dt>Attendance</dt><dd>{row.attendanceType==="full"?"Day 1 + 2":"Day 1"}</dd></div><div><dt>Fee</dt><dd>{rm(row.registrationFeeInSen)}</dd></div><div><dt>Registration</dt><dd><span className={`status ${row.registrationStatus}`}>{row.registrationStatus}</span></dd></div><div><dt>Submitted</dt><dd>{row.submittedAt?.toDate().toLocaleDateString("en-MY")||"—"}</dd></div></dl><div className="mobile-registration-actions">{actions(row,true)}</div></article>)}</section>
+    <article className="finance-panel table-panel"><div className="table-meta"><b>{filtered.length} registrations</b><span>Identification numbers are masked by default</span></div><div className="transaction-table"><table><thead><tr><th>Reference</th><th>Participant</th><th>Organisation</th><th>Attendance</th><th>Fee</th><th>Payment</th><th>Registration</th><th>Submitted</th><th>Actions</th></tr></thead><tbody>{filtered.map(row=><tr key={row.id}><td><b>{row.referenceNumber}</b><small>{maskIdentification(row.identificationNumber)}</small></td><td><b>{row.fullName}</b><small>{row.email}</small></td><td><b>{row.organisationType}</b><small>{row.workplace}</small></td><td>{row.attendanceType==="full"?"Day 1 + 2":"Day 1"}</td><td>{rm(row.registrationFeeInSen)}</td><td><span className={`status ${row.paymentStatus}`}>{row.paymentStatus.replaceAll("_"," ")}</span></td><td><span className={`status ${row.registrationStatus}`}>{row.registrationStatus}</span></td><td>{registrationDate(row.submittedAt)?.toLocaleDateString("en-MY")||"—"}</td><td>{actions(row)}</td></tr>)}</tbody></table></div></article>
+    <section className="mobile-registrations" aria-label="Mobile registration list">{filtered.length===0?<div className="mobile-registration-empty"><Search/><b>No registrations found</b><span>Clear or change the filters to see registrations.</span></div>:filtered.map(row=><article className="mobile-registration-card" key={row.id}><header><div><span>{row.referenceNumber}</span><h3>{row.fullName}</h3><p>{row.email}</p></div><span className={`status ${row.paymentStatus}`}>{row.paymentStatus.replaceAll("_"," ")}</span></header><dl><div><dt>Organisation</dt><dd>{row.organisationType}<small>{row.workplace}</small></dd></div><div><dt>Identification</dt><dd>{maskIdentification(row.identificationNumber)}</dd></div><div><dt>Attendance</dt><dd>{row.attendanceType==="full"?"Day 1 + 2":"Day 1"}</dd></div><div><dt>Fee</dt><dd>{rm(row.registrationFeeInSen)}</dd></div><div><dt>Registration</dt><dd><span className={`status ${row.registrationStatus}`}>{row.registrationStatus}</span></dd></div><div><dt>Submitted</dt><dd>{registrationDate(row.submittedAt)?.toLocaleDateString("en-MY")||"—"}</dd></div></dl><div className="mobile-registration-actions">{actions(row,true)}</div></article>)}</section>
     {selected&&<><div className="modal-backdrop" onClick={()=>setSelected(null)}/><div className="confirm-dialog registration-detail"><button className="row-menu detail-close" aria-label="Close registration details" onClick={()=>setSelected(null)}><X/></button><h3>{selected.referenceNumber}</h3><p><b>{selected.fullName}</b><br/>{selected.email}</p><dl><div><dt>Identification</dt><dd>{selected.identificationNumber}</dd></div><div><dt>Organisation</dt><dd>{selected.organisationType}</dd></div><div><dt>Workplace</dt><dd>{selected.workplace}</dd></div><div><dt>Expertise</dt><dd>{selected.expertise}</dd></div><div><dt>Attendance</dt><dd>{selected.attendanceLabel}</dd></div><div><dt>Fee</dt><dd>{rm(selected.registrationFeeInSen)}</dd></div><div><dt>Payment</dt><dd><span className={`status ${selected.paymentStatus}`}>{selected.paymentStatus.replaceAll("_"," ")}</span></dd></div></dl><div className="registration-detail-actions"><button className="premium-btn ghost" onClick={()=>viewProof(selected)}><Download/>View Payment Proof</button>{selected.paymentStatus==="pending_verification"&&<><button className="premium-btn primary" onClick={()=>verify(selected)}><Check/>Verify Payment</button><button className="premium-btn danger" onClick={()=>reject(selected)}><X/>Reject Payment</button></>}{selected.paymentStatus==="verified"&&<button className="premium-btn primary" onClick={()=>confirmationLetter(selected)}><FileDown/>Download Confirmation Letter</button>}<button className="premium-btn danger" onClick={()=>removeRegistration(selected)}><Trash2/>Delete Registration</button></div></div></>}
   </>;
 }

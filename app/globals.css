@@ -57,3 +57,5 @@ input[type="file"]{min-height:44px;padding:5px 6px;color:var(--text);line-height
 .chart-panel-title select{min-height:44px;padding:0 38px 0 14px;border:1px solid #f1cbd8;border-radius:12px;background:#fff1f5;color:#2d2025;font:inherit;cursor:pointer;outline:none}
 .chart-panel-title select:focus-visible{border-color:#be5678;box-shadow:0 0 0 3px rgba(190,86,120,.16)}
 @media(max-width:560px){.chart-panel-title{align-items:flex-start;gap:14px}.chart-panel-title label,.chart-panel-title select{width:100%}}
+
+.heading-actions{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:9px}

@@ -20,3 +20,13 @@ export async function requestRegistrationEmail(user: User, registrationId: strin
   }
   return false;
 }
+
+export type EventReminderResult = { sent: number; failed: number; total: number };
+
+export async function requestEventReminder(user: User): Promise<EventReminderResult> {
+  const token = await user.getIdToken(true);
+  const response = await fetch("/api/event-reminder", { method: "POST", headers: { Authorization: `Bearer ${token}` } });
+  const result = await response.json().catch(() => ({})) as EventReminderResult & { error?: string };
+  if (!response.ok) throw new Error(result.error || "Event reminder could not be sent.");
+  return result;
+}

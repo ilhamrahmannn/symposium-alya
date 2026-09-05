@@ -139,6 +139,50 @@ function adminNotificationRecipients(env: Env) {
     .filter(email => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email));
 }
 
+
+function calendarTimestamp(date: string, time: string) {
+  const local = new Date(`${date}T${time}:00+08:00`);
+  if (Number.isNaN(local.getTime())) return null;
+  return local.toISOString().replace(/[-:]/g, "").replace(/\.\d{3}Z$/, "Z");
+}
+
+function addHours(timestamp: string, hours: number) {
+  const date = new Date(timestamp.replace(/^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z$/, "$1-$2-$3T$4:$5:$6Z"));
+  date.setUTCHours(date.getUTCHours() + hours);
+  return date.toISOString().replace(/[-:]/g, "").replace(/\.\d{3}Z$/, "Z");
+}
+
+function icsEscape(value: string) {
+  return value.replace(/\\/g, "\\\\").replace(/\r?\n/g, "\\n").replace(/,/g, "\\,").replace(/;/g, "\\;");
+}
+
+function eventCalendar(title: string, description: string, venue: string, start: string, siteUrl: string) {
+  const end = addHours(start, 8);
+  const google = new URL("https://calendar.google.com/calendar/render");
+  google.searchParams.set("action", "TEMPLATE");
+  google.searchParams.set("text", title);
+  google.searchParams.set("dates", `${start}/${end}`);
+  google.searchParams.set("details", `${description}\n\n${siteUrl}`);
+  google.searchParams.set("location", venue);
+  google.searchParams.set("ctz", "Asia/Kuala_Lumpur");
+  const stamp = new Date().toISOString().replace(/[-:]/g, "").replace(/\.\d{3}Z$/, "Z");
+  const ics = [
+    "BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//PRS Symposium//Event Reminder//EN", "CALSCALE:GREGORIAN", "METHOD:PUBLISH",
+    "BEGIN:VEVENT", `UID:prs-symposium-2026-${start}@prs-symposium`, `DTSTAMP:${stamp}`,
+    `DTSTART:${start}`, `DTEND:${end}`, `SUMMARY:${icsEscape(title)}`,
+    `DESCRIPTION:${icsEscape(`${description}\n${siteUrl}`)}`, `LOCATION:${icsEscape(venue)}`,
+    "STATUS:CONFIRMED", "END:VEVENT", "END:VCALENDAR", "",
+  ].join("\r\n");
+  return { googleUrl: google.toString(), icsBase64: utf8Base64(ics) };
+}
+
+function tokenUserId(token: string) {
+  try {
+    const payload = token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/");
+    return String((JSON.parse(atob(payload)) as { sub?: string; user_id?: string }).sub || "");
+  } catch { return ""; }
+}
+
 const EVENT_TITLE = "Symposium on Management of Pierre Robin Sequence in Infants 2026";
 const EVENT_SUBTITLE = "Connecting Disciplines, Transforming Care: An Integrated Approach to Pierre Robin Sequence";
 
@@ -214,6 +258,75 @@ async function registrationPdfBase64(data: { reference: string; fullName: string
   pdf.text("Keep this document and registration reference for future communication and event check-in.", 18, 282);
   pdf.text("Generated electronically by the PRS Symposium 2026 registration system.", 18, 287);
   return pdf.output("datauristring").split(",")[1];
+}
+
+
+async function eventReminder(request: Request, env: Env) {
+  if (request.method !== "POST") return new Response("Method not allowed", { status: 405 });
+  const token = request.headers.get("authorization")?.replace(/^Bearer\s+/i, "");
+  const uid = token ? tokenUserId(token) : "";
+  if (!token || !uid) return Response.json({ error: "Authentication required" }, { status: 401 });
+
+  const projectId = env.FIREBASE_PROJECT_ID || "symposium-alya";
+  const programId = env.PROGRAM_ID || "prs-symposium-2026";
+  const root = `https://firestore.googleapis.com/v1/projects/${encodeURIComponent(projectId)}/databases/(default)/documents`;
+  const headers = { Authorization: `Bearer ${token}` };
+  const memberResponse = await fetch(`${root}/programs/${encodeURIComponent(programId)}/members/${encodeURIComponent(uid)}`, { headers });
+  if (!memberResponse.ok) return Response.json({ error: "Administrator access required" }, { status: 403 });
+  const member = await memberResponse.json() as { fields?: Record<string, FirestoreValue> };
+  if (firestoreValue(member.fields?.role) !== "admin" || firestoreValue(member.fields?.active) !== true) {
+    return Response.json({ error: "Administrator access required" }, { status: 403 });
+  }
+
+  const settingsResponse = await fetch(`${root}/programs/${encodeURIComponent(programId)}/public/event`, { headers });
+  if (!settingsResponse.ok) return Response.json({ error: "Event Settings could not be loaded." }, { status: 422 });
+  const settings = await settingsResponse.json() as { fields?: Record<string, FirestoreValue> };
+  const eventDate = String(firestoreValue(settings.fields?.eventDate));
+  const eventTime = String(firestoreValue(settings.fields?.eventTime));
+  const venue = String(firestoreValue(settings.fields?.venue)).trim();
+  const start = calendarTimestamp(eventDate, eventTime);
+  if (!start || !venue) return Response.json({ error: "Complete the event date, time and venue in Event Settings before sending." }, { status: 422 });
+
+  const gmailConfigured = Boolean(env.GMAIL_CLIENT_ID && env.GMAIL_CLIENT_SECRET && env.GMAIL_REFRESH_TOKEN && env.GMAIL_SENDER_EMAIL);
+  const resendConfigured = Boolean(env.RESEND_API_KEY && env.EMAIL_FROM_ADDRESS);
+  if (!gmailConfigured && !resendConfigured) return Response.json({ error: "Email service is not configured." }, { status: 503 });
+
+  const queryResponse = await fetch(`https://firestore.googleapis.com/v1/projects/${encodeURIComponent(projectId)}/databases/(default)/documents/programs/${encodeURIComponent(programId)}:runQuery`, {
+    method: "POST", headers: { ...headers, "Content-Type": "application/json" },
+    body: JSON.stringify({ structuredQuery: {
+      from: [{ collectionId: "registrations" }],
+      where: { fieldFilter: { field: { fieldPath: "registrationStatus" }, op: "EQUAL", value: { stringValue: "confirmed" } } },
+    } }),
+  });
+  if (!queryResponse.ok) return Response.json({ error: "Confirmed participants could not be loaded." }, { status: 502 });
+  const results = await queryResponse.json() as Array<{ document?: { fields?: Record<string, FirestoreValue> } }>;
+  const confirmed = results.filter(result => result.document).map(result => result.document?.fields || {});
+  const recipients = confirmed.filter(fields => {
+    const email = String(firestoreValue(fields.email));
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+  });
+  const siteUrl = env.PUBLIC_SITE_URL || new URL(request.url).origin;
+  const calendar = eventCalendar(EVENT_TITLE, EVENT_SUBTITLE, venue, start, siteUrl);
+  const displayDate = new Date(`${eventDate}T00:00:00+08:00`).toLocaleDateString("en-MY", { dateStyle: "long", timeZone: "Asia/Kuala_Lumpur" });
+  const displayTime = new Date(`${eventDate}T${eventTime}:00+08:00`).toLocaleTimeString("en-MY", { hour: "numeric", minute: "2-digit", timeZone: "Asia/Kuala_Lumpur" });
+  const subject = `Event reminder - ${EVENT_TITLE}`;
+  const sendOne = async (fields: Record<string, FirestoreValue>) => {
+    const email = String(firestoreValue(fields.email));
+    const fullName = String(firestoreValue(fields.fullName));
+    const html = `<!doctype html><html><body style="margin:0;background:#070707;color:#fff;font-family:Arial,sans-serif"><div style="max-width:620px;margin:auto;padding:36px"><p style="color:#d4af37;letter-spacing:2px;font-size:12px">PRS SYMPOSIUM &amp; WORKSHOP 2026</p><h1>Event Reminder</h1><p style="color:#c9c5bc;line-height:1.7">Dear ${escapeHtml(fullName)},</p><p style="color:#c9c5bc;line-height:1.7">We look forward to welcoming you to the upcoming symposium. Your registration is confirmed.</p><div style="margin:26px 0;padding:22px;border:1px solid rgba(212,175,55,.35);border-radius:14px;background:#111"><p><small style="color:#8e8a82">DATE</small><br><strong>${escapeHtml(displayDate)}</strong></p><p><small style="color:#8e8a82">TIME</small><br><strong>${escapeHtml(displayTime)}</strong></p><p><small style="color:#8e8a82">VENUE</small><br><strong>${escapeHtml(venue)}</strong></p></div><a href="${escapeHtml(calendar.googleUrl)}" style="display:inline-block;padding:14px 22px;border-radius:10px;background:#d4af37;color:#17130a;text-decoration:none;font-weight:bold">Add to Google Calendar</a><p style="color:#8e8a82;font-size:12px;line-height:1.6">For Apple Calendar or Outlook, open the attached ICS calendar file.</p></div></body></html>`;
+    const attachments = [{ filename: "prs-symposium-2026.ics", content: calendar.icsBase64, contentType: "text/calendar; charset=utf-8; method=PUBLISH" }];
+    const gmailResponse = await sendWithGmail(env, { to: email, subject, html, attachments });
+    if (gmailResponse) return gmailResponse.ok;
+    const resendResponse = await fetch("https://api.resend.com/emails", { method: "POST", headers: { Authorization: `Bearer ${env.RESEND_API_KEY}`, "Content-Type": "application/json" }, body: JSON.stringify({ from: env.EMAIL_FROM_ADDRESS, reply_to: env.EMAIL_REPLY_TO || undefined, to: [email], subject, html, attachments }) });
+    return resendResponse.ok;
+  };
+
+  let sent = 0;
+  for (let index = 0; index < recipients.length; index += 5) {
+    const batch = await Promise.allSettled(recipients.slice(index, index + 5).map(sendOne));
+    sent += batch.filter(result => result.status === "fulfilled" && result.value).length;
+  }
+  return Response.json({ sent, failed: confirmed.length - sent, total: confirmed.length });
 }
 
 async function registrationEmail(request: Request, env: Env) {
@@ -301,6 +414,7 @@ const worker = {
     const url = new URL(request.url);
 
     if (url.pathname === "/api/registration-email") return registrationEmail(request, env);
+    if (url.pathname === "/api/event-reminder") return eventReminder(request, env);
 
     if (url.pathname === "/_vinext/image") {
       const allowedWidths = [...DEFAULT_DEVICE_SIZES, ...DEFAULT_IMAGE_SIZES];
