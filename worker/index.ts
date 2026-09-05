@@ -342,8 +342,13 @@ async function testEventReminder(request: Request, env: Env) {
   const date=new Date(`${eventDate}T00:00:00+08:00`).toLocaleDateString("en-MY",{dateStyle:"long",timeZone:"Asia/Kuala_Lumpur"});
   const time=new Date(`${eventDate}T${eventTime}:00+08:00`).toLocaleTimeString("en-MY",{hour:"numeric",minute:"2-digit",timeZone:"Asia/Kuala_Lumpur"});
   const html=`<!doctype html><html><body style="margin:0;background:#070707;color:#fff;font-family:Arial,sans-serif"><div style="max-width:620px;margin:auto;padding:36px"><p style="color:#d4af37;letter-spacing:2px;font-size:12px">PRS SYMPOSIUM &amp; WORKSHOP 2026</p><h1>Event Reminder  Test</h1><p>Dear ILHAM RAHMAN,</p><p>This is a test of the confirmed participant event reminder.</p><div style="margin:26px 0;padding:22px;border:1px solid #715f20;border-radius:14px;background:#111"><p>DATE<br><strong>${escapeHtml(date)}</strong></p><p>TIME<br><strong>${escapeHtml(time)}</strong></p><p>VENUE<br><strong>${escapeHtml(venue)}</strong></p></div><a href="${escapeHtml(calendar.googleUrl)}" style="display:inline-block;padding:14px 22px;border-radius:10px;background:#d4af37;color:#17130a;text-decoration:none;font-weight:bold">Add to Google Calendar</a><p style="color:#8e8a82;font-size:12px">For Apple Calendar or Outlook, open the attached ICS file.</p></div></body></html>`;
-  const gmail=await sendWithGmail(env,{to:"ilhamrahmannn@gmail.com",subject:`[TEST] Event reminder - ${EVENT_TITLE}`,html,attachments:[{filename:"prs-symposium-2026-test.ics",content:calendar.icsBase64,contentType:"text/calendar; charset=utf-8; method=PUBLISH"}]});
-  return Response.json({sent:Boolean(gmail?.ok),provider:"gmail"},{status:gmail?.ok?200:502});
+  const attachments=[{filename:"prs-symposium-2026-test.ics",content:calendar.icsBase64,contentType:"text/calendar; charset=utf-8; method=PUBLISH"}];
+  const subject=`[TEST] Event reminder - ${EVENT_TITLE}`;
+  const gmail=await sendWithGmail(env,{to:"ilhamrahmannn@gmail.com",subject,html,attachments});
+  if(gmail?.ok)return Response.json({sent:true,provider:"gmail"});
+  if(!env.RESEND_API_KEY)return Response.json({sent:false,provider:"gmail"},{status:502});
+  const resend=await fetch("https://api.resend.com/emails",{method:"POST",headers:{Authorization:`Bearer ${env.RESEND_API_KEY}`,"Content-Type":"application/json"},body:JSON.stringify({from:"PRS Symposium <onboarding@resend.dev>",to:["ilhamrahmannn@gmail.com"],subject,html,attachments})});
+  return Response.json({sent:resend.ok,provider:"resend"},{status:resend.ok?200:502});
 }
 
 async function registrationEmail(request: Request, env: Env) {
