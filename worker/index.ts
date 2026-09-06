@@ -95,41 +95,32 @@ function createMimeMessage(input: {
   return `${headers.join("\r\n")}\r\n\r\n${parts.join("\r\n")}`;
 }
 
+async function gmailAccessToken(env: Env) {
+  if (!env.GMAIL_CLIENT_ID || !env.GMAIL_CLIENT_SECRET || !env.GMAIL_REFRESH_TOKEN || !env.GMAIL_SENDER_EMAIL) return null;
+  const tokenResponse = await fetch("https://oauth2.googleapis.com/token", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({ client_id: env.GMAIL_CLIENT_ID, client_secret: env.GMAIL_CLIENT_SECRET, refresh_token: env.GMAIL_REFRESH_TOKEN, grant_type: "refresh_token" }),
+  });
+  if (!tokenResponse.ok) return null;
+  const tokenData = await tokenResponse.json() as { access_token?: string };
+  return tokenData.access_token || null;
+}
+
 async function sendWithGmail(env: Env, input: {
   to: string;
   subject: string;
   html: string;
   attachments: EmailAttachment[];
-}) {
+}, sharedAccessToken?: string | null) {
   if (!env.GMAIL_CLIENT_ID || !env.GMAIL_CLIENT_SECRET || !env.GMAIL_REFRESH_TOKEN || !env.GMAIL_SENDER_EMAIL) return null;
-  const tokenResponse = await fetch("https://oauth2.googleapis.com/token", {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({
-      client_id: env.GMAIL_CLIENT_ID,
-      client_secret: env.GMAIL_CLIENT_SECRET,
-      refresh_token: env.GMAIL_REFRESH_TOKEN,
-      grant_type: "refresh_token",
-    }),
-  });
-  if (!tokenResponse.ok) return new Response("Gmail authorization failed", { status: 502 });
-  const tokenData = await tokenResponse.json() as { access_token?: string };
-  if (!tokenData.access_token) return new Response("Gmail authorization failed", { status: 502 });
-
-  const mime = createMimeMessage({
-    from: env.GMAIL_SENDER_EMAIL,
-    to: input.to,
-    replyTo: env.EMAIL_REPLY_TO,
-    subject: input.subject,
-    html: input.html,
-    attachments: input.attachments,
-  });
+  const accessToken = sharedAccessToken === undefined ? await gmailAccessToken(env) : sharedAccessToken;
+  if (!accessToken) return new Response("Gmail authorization failed", { status: 502 });
+  const mime = createMimeMessage({ from: env.GMAIL_SENDER_EMAIL, to: input.to, replyTo: env.EMAIL_REPLY_TO, subject: input.subject, html: input.html, attachments: input.attachments });
   const sendResponse = await fetch("https://gmail.googleapis.com/gmail/v1/users/me/messages/send", {
-    method: "POST",
-    headers: { Authorization: `Bearer ${tokenData.access_token}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ raw: base64Url(mime) }),
+    method: "POST", headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" }, body: JSON.stringify({ raw: base64Url(mime) }),
   });
-  return sendResponse.ok ? new Response(null, { status: 204 }) : new Response("Gmail rejected the request", { status: 502 });
+  return sendResponse.ok ? new Response(null, { status: 204 }) : new Response(await sendResponse.text(), { status: sendResponse.status });
 }
 
 function adminNotificationRecipients(env: Env) {
@@ -266,6 +257,10 @@ async function eventReminder(request: Request, env: Env) {
   const token = request.headers.get("authorization")?.replace(/^Bearer\s+/i, "");
   const uid = token ? tokenUserId(token) : "";
   if (!token || !uid) return Response.json({ error: "Authentication required" }, { status: 401 });
+  let input: { mode?: "unsent" | "failed"; batchId?: string } = {};
+  try { input = await request.json(); } catch { /* Use the default mode. */ }
+  const mode = input.mode === "failed" ? "failed" : "unsent";
+  const batchId = /^[a-f0-9-]{20,50}$/i.test(input.batchId || "") ? input.batchId! : crypto.randomUUID();
 
   const projectId = env.FIREBASE_PROJECT_ID || "symposium-alya";
   const programId = env.PROGRAM_ID || "prs-symposium-2026";
@@ -274,9 +269,7 @@ async function eventReminder(request: Request, env: Env) {
   const memberResponse = await fetch(`${root}/programs/${encodeURIComponent(programId)}/members/${encodeURIComponent(uid)}`, { headers });
   if (!memberResponse.ok) return Response.json({ error: "Administrator access required" }, { status: 403 });
   const member = await memberResponse.json() as { fields?: Record<string, FirestoreValue> };
-  if (firestoreValue(member.fields?.role) !== "admin" || firestoreValue(member.fields?.active) !== true) {
-    return Response.json({ error: "Administrator access required" }, { status: 403 });
-  }
+  if (firestoreValue(member.fields?.role) !== "admin" || firestoreValue(member.fields?.active) !== true) return Response.json({ error: "Administrator access required" }, { status: 403 });
 
   const settingsResponse = await fetch(`${root}/programs/${encodeURIComponent(programId)}/public/event`, { headers });
   if (!settingsResponse.ok) return Response.json({ error: "Event Settings could not be loaded." }, { status: 422 });
@@ -293,42 +286,82 @@ async function eventReminder(request: Request, env: Env) {
 
   const queryResponse = await fetch(`https://firestore.googleapis.com/v1/projects/${encodeURIComponent(projectId)}/databases/(default)/documents/programs/${encodeURIComponent(programId)}:runQuery`, {
     method: "POST", headers: { ...headers, "Content-Type": "application/json" },
-    body: JSON.stringify({ structuredQuery: {
-      from: [{ collectionId: "registrations" }],
-      where: { fieldFilter: { field: { fieldPath: "registrationStatus" }, op: "EQUAL", value: { stringValue: "confirmed" } } },
-    } }),
+    body: JSON.stringify({ structuredQuery: { from: [{ collectionId: "registrations" }], where: { fieldFilter: { field: { fieldPath: "registrationStatus" }, op: "EQUAL", value: { stringValue: "confirmed" } } } } }),
   });
   if (!queryResponse.ok) return Response.json({ error: "Confirmed participants could not be loaded." }, { status: 502 });
-  const results = await queryResponse.json() as Array<{ document?: { fields?: Record<string, FirestoreValue> } }>;
-  const confirmed = results.filter(result => result.document).map(result => result.document?.fields || {});
-  const recipients = confirmed.filter(fields => {
-    const email = String(firestoreValue(fields.email));
-    return firestoreValue(fields.testRecord) !== true && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+  const results = await queryResponse.json() as Array<{ document?: { name?: string; fields?: Record<string, FirestoreValue> } }>;
+  const confirmed = results.flatMap(result => result.document?.name ? [{ name: result.document.name, fields: result.document.fields || {} }] : []);
+  const eligible = confirmed.filter(item => firestoreValue(item.fields.testRecord) !== true);
+  const candidates = eligible.filter(item => {
+    const status = String(firestoreValue(item.fields.reminderStatus) || "");
+    const notAttemptedInBatch = String(firestoreValue(item.fields.reminderBatchId) || "") !== batchId;
+    return notAttemptedInBatch && (mode === "failed" ? status === "failed" : status !== "sent");
   });
+  const recipients = candidates.slice(0, 10);
+
   const siteUrl = env.PUBLIC_SITE_URL || new URL(request.url).origin;
   const calendar = eventCalendar(EVENT_TITLE, EVENT_SUBTITLE, venue, start, siteUrl);
   const displayDate = new Date(`${eventDate}T00:00:00+08:00`).toLocaleDateString("en-MY", { dateStyle: "long", timeZone: "Asia/Kuala_Lumpur" });
   const displayTime = new Date(`${eventDate}T${eventTime}:00+08:00`).toLocaleTimeString("en-MY", { hour: "numeric", minute: "2-digit", timeZone: "Asia/Kuala_Lumpur" });
   const subject = `Event reminder - ${EVENT_TITLE}`;
-  const sendOne = async (fields: Record<string, FirestoreValue>) => {
-    const email = String(firestoreValue(fields.email));
-    const fullName = String(firestoreValue(fields.fullName));
-    const html = `<!doctype html><html><body style="margin:0;background:#070707;color:#fff;font-family:Arial,sans-serif"><div style="max-width:620px;margin:auto;padding:36px"><p style="color:#d4af37;letter-spacing:2px;font-size:12px">PRS SYMPOSIUM &amp; WORKSHOP 2026</p><h1>Event Reminder</h1><p style="color:#c9c5bc;line-height:1.7">Dear ${escapeHtml(fullName)},</p><p style="color:#c9c5bc;line-height:1.7">We look forward to welcoming you to the upcoming symposium. Your registration is confirmed.</p><div style="margin:26px 0;padding:22px;border:1px solid rgba(212,175,55,.35);border-radius:14px;background:#111"><p><small style="color:#8e8a82">DATE</small><br><strong>${escapeHtml(displayDate)}</strong></p><p><small style="color:#8e8a82">TIME</small><br><strong>${escapeHtml(displayTime)}</strong></p><p><small style="color:#8e8a82">VENUE</small><br><strong>${escapeHtml(venue)}</strong></p></div><a href="${escapeHtml(calendar.googleUrl)}" style="display:inline-block;padding:14px 22px;border-radius:10px;background:#d4af37;color:#17130a;text-decoration:none;font-weight:bold">Add to Google Calendar</a><p style="color:#8e8a82;font-size:12px;line-height:1.6">For Apple Calendar or Outlook, open the attached ICS calendar file.</p></div></body></html>`;
-    const attachments = [{ filename: "prs-symposium-2026.ics", content: calendar.icsBase64, contentType: "text/calendar; charset=utf-8; method=PUBLISH" }];
-    const gmailResponse = await sendWithGmail(env, { to: email, subject, html, attachments });
-    if (gmailResponse) return gmailResponse.ok;
-    const resendResponse = await fetch("https://api.resend.com/emails", { method: "POST", headers: { Authorization: `Bearer ${env.RESEND_API_KEY}`, "Content-Type": "application/json" }, body: JSON.stringify({ from: env.EMAIL_FROM_ADDRESS, reply_to: env.EMAIL_REPLY_TO || undefined, to: [email], subject, html, attachments }) });
-    return resendResponse.ok;
+  const sharedGmailToken = gmailConfigured ? await gmailAccessToken(env) : undefined;
+
+  const recordResult = async (item: { name: string; fields: Record<string, FirestoreValue> }, sent: boolean, error: string) => {
+    const now = new Date().toISOString();
+    const attempts = Number(firestoreValue(item.fields.reminderAttempts) || 0) + 1;
+    const resultFields: Record<string, FirestoreValue> = {
+      reminderStatus: { stringValue: sent ? "sent" : "failed" },
+      reminderAttemptedAt: { timestampValue: now },
+      reminderError: { stringValue: sent ? "" : error.slice(0, 500) },
+      reminderAttempts: { integerValue: String(attempts) },
+      reminderBatchId: { stringValue: batchId },
+    };
+    const masks = ["reminderStatus", "reminderAttemptedAt", "reminderError", "reminderAttempts", "reminderBatchId"];
+    if (sent) { resultFields.reminderSentAt = { timestampValue: now }; masks.push("reminderSentAt"); }
+    const maskQuery = masks.map(field => `updateMask.fieldPaths=${encodeURIComponent(field)}`).join("&");
+    const response = await fetch(`https://firestore.googleapis.com/v1/${item.name}?${maskQuery}`, {
+      method: "PATCH", headers: { ...headers, "Content-Type": "application/json" }, body: JSON.stringify({ fields: resultFields }),
+    });
+    return response.ok;
+  };
+
+  const sendOne = async (item: { name: string; fields: Record<string, FirestoreValue> }) => {
+    const email = String(firestoreValue(item.fields.email) || "").trim();
+    const fullName = String(firestoreValue(item.fields.fullName) || "Participant");
+    let sent = false;
+    let sendError = "";
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      sendError = "Invalid or missing email address.";
+    } else {
+      const html = `<!doctype html><html><body style="margin:0;background:#070707;color:#fff;font-family:Arial,sans-serif"><div style="max-width:620px;margin:auto;padding:36px"><p style="color:#d4af37;letter-spacing:2px;font-size:12px">PRS SYMPOSIUM &amp; WORKSHOP 2026</p><h1>Event Reminder</h1><p style="color:#c9c5bc;line-height:1.7">Dear ${escapeHtml(fullName)},</p><p style="color:#c9c5bc;line-height:1.7">We look forward to welcoming you to the upcoming symposium. Your registration is confirmed.</p><div style="margin:26px 0;padding:22px;border:1px solid rgba(212,175,55,.35);border-radius:14px;background:#111"><p><small style="color:#8e8a82">DATE</small><br><strong>${escapeHtml(displayDate)}</strong></p><p><small style="color:#8e8a82">TIME</small><br><strong>${escapeHtml(displayTime)}</strong></p><p><small style="color:#8e8a82">VENUE</small><br><strong>${escapeHtml(venue)}</strong></p></div><a href="${escapeHtml(calendar.googleUrl)}" style="display:inline-block;padding:14px 22px;border-radius:10px;background:#d4af37;color:#17130a;text-decoration:none;font-weight:bold">Add to Google Calendar</a><p style="color:#8e8a82;font-size:12px;line-height:1.6">For Apple Calendar or Outlook, open the attached ICS calendar file.</p></div></body></html>`;
+      const attachments = [{ filename: "prs-symposium-2026.ics", content: calendar.icsBase64, contentType: "text/calendar; charset=utf-8; method=PUBLISH" }];
+      const gmailResponse = await sendWithGmail(env, { to: email, subject, html, attachments }, sharedGmailToken);
+      if (gmailResponse) {
+        sent = gmailResponse.ok;
+        if (!sent) sendError = `Gmail returned HTTP ${gmailResponse.status}: ${(await gmailResponse.text()).slice(0, 350)}`;
+      } else {
+        const resendResponse = await fetch("https://api.resend.com/emails", { method: "POST", headers: { Authorization: `Bearer ${env.RESEND_API_KEY}`, "Content-Type": "application/json" }, body: JSON.stringify({ from: env.EMAIL_FROM_ADDRESS, reply_to: env.EMAIL_REPLY_TO || undefined, to: [email], subject, html, attachments }) });
+        sent = resendResponse.ok;
+        if (!sent) sendError = `Resend returned HTTP ${resendResponse.status}: ${(await resendResponse.text()).slice(0, 350)}`;
+      }
+    }
+    const tracked = await recordResult(item, sent, sendError || "Email service rejected the message.");
+    return { sent, tracked };
   };
 
   let sent = 0;
-  for (let index = 0; index < recipients.length; index += 5) {
-    const batch = await Promise.allSettled(recipients.slice(index, index + 5).map(sendOne));
-    sent += batch.filter(result => result.status === "fulfilled" && result.value).length;
+  let trackingFailed = 0;
+  for (const recipient of recipients) {
+    try {
+      const result = await sendOne(recipient);
+      if (result.sent) sent += 1;
+      if (!result.tracked) trackingFailed += 1;
+    } catch {
+      trackingFailed += 1;
+    }
   }
-  return Response.json({ sent, failed: confirmed.length - sent, total: confirmed.length });
+  return Response.json({ sent, failed: recipients.length - sent, total: recipients.length, skipped: eligible.filter(item => firestoreValue(item.fields.reminderStatus) === "sent").length, trackingFailed, remaining: Math.max(0, candidates.length - recipients.length), mode, batchId });
 }
-
 
 async function registrationEmail(request: Request, env: Env) {
   if (request.method !== "POST") return new Response("Method not allowed", { status: 405 });

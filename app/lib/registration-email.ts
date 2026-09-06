@@ -21,12 +21,23 @@ export async function requestRegistrationEmail(user: User, registrationId: strin
   return false;
 }
 
-export type EventReminderResult = { sent: number; failed: number; total: number };
+export type EventReminderResult = { sent: number; failed: number; total: number; skipped: number; trackingFailed: number; remaining: number; mode: "unsent" | "failed"; batchId: string };
 
-export async function requestEventReminder(user: User): Promise<EventReminderResult> {
+export async function requestEventReminder(user: User, mode: "unsent" | "failed" = "unsent"): Promise<EventReminderResult> {
   const token = await user.getIdToken(true);
-  const response = await fetch("/api/event-reminder", { method: "POST", headers: { Authorization: `Bearer ${token}` } });
-  const result = await response.json().catch(() => ({})) as EventReminderResult & { error?: string };
-  if (!response.ok) throw new Error(result.error || "Event reminder could not be sent.");
-  return result;
+  const batchId = crypto.randomUUID();
+  const aggregate: EventReminderResult = { sent: 0, failed: 0, total: 0, skipped: 0, trackingFailed: 0, remaining: 0, mode, batchId };
+  for (let batch = 0; batch < 100; batch += 1) {
+    const response = await fetch("/api/event-reminder", { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` }, body: JSON.stringify({ mode, batchId }) });
+    const result = await response.json().catch(() => ({})) as EventReminderResult & { error?: string };
+    if (!response.ok) throw new Error(result.error || `Event reminder stopped after ${aggregate.sent} successful send${aggregate.sent===1?"":"s"}.`);
+    aggregate.sent += result.sent;
+    aggregate.failed += result.failed;
+    aggregate.total += result.total;
+    aggregate.trackingFailed += result.trackingFailed;
+    if (batch === 0) aggregate.skipped = result.skipped;
+    aggregate.remaining = result.remaining;
+    if (result.trackingFailed > 0 || result.remaining === 0) return aggregate;
+  }
+  throw new Error(`Event reminder stopped after ${aggregate.sent} successful sends because the batch limit was reached.`);
 }
